@@ -27,7 +27,6 @@ def get_config():
     # model configuration
     cfg.input_size = 3  # number of input features, including time
     cfg.num_classes = 2  # maximum number of ancestors per halo
-    cfg.sum_features = False  # sum over transformer outputs instead of taking the last one
     cfg.num_samples_per_graph = 4  # number of samples to generate per graph
     cfg.d_time = 1
     cfg.d_time_projection = 64
@@ -38,6 +37,7 @@ def get_config():
     cfg.featurizer.nhead = 4
     cfg.featurizer.num_encoder_layers = 3
     cfg.featurizer.dim_feedforward = 128
+    cfg.featurizer.sum_features = False  # sum over transformer outputs instead of taking the last one
     cfg.featurizer.batch_first = True
     cfg.featurizer.use_embedding = True
     cfg.featurizer.activation = config_dict.ConfigDict()
