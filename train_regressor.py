@@ -82,7 +82,6 @@ def train(
         flows_args=config.flows,
         optimizer_args=config.optimizer,
         scheduler_args=config.scheduler,
-        sum_features=config.sum_features,
         d_time = config.d_time,
         d_time_projection = config.d_time_projection,
         d_feat_projection = config.d_feat_projection,
