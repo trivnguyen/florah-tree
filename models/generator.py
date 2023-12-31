@@ -22,6 +22,7 @@ class TreeGenerator(pl.LightningModule):
         d_time=1,
         d_time_projection=128,
         d_feat_projection=128,
+        classifier_loss_weight=1.0,
         num_samples_per_graph=1,
         norm_dict=None,
     ):

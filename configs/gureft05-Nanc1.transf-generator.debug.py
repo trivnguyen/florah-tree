@@ -12,11 +12,23 @@ def get_config():
     cfg.workdir = './logging/'
     cfg.name = 'GUREFT05-Nanc1.transfGenerator.debug'
 
+    # training configuration
+    # batching and shuffling
+    cfg.train_frac = 0.8
+    cfg.train_batch_size = 1024
+    cfg.num_workers = 4
+
+    # evaluation configuration
+    cfg.eval_batch_size = 1024
+
+    # loss configuration
+    cfg.classifier_loss_weight = 1.0
+
     # model configuration
-    cfg.input_size = 3
-    cfg.num_classes = 2
-    cfg.sum_features = False
-    cfg.num_samples_per_graph = 1
+    cfg.input_size = 3  # number of input features, including time
+    cfg.num_classes = 2  # maximum number of ancestors per halo
+    cfg.sum_features = False  # sum over transformer outputs instead of taking the last one
+    cfg.num_samples_per_graph = 4  # number of samples to generate per graph
     cfg.d_time = 1
     cfg.d_time_projection = 64
     cfg.d_feat_projection = 64
@@ -50,18 +62,6 @@ def get_config():
     cfg.classifier.activation = config_dict.ConfigDict()
     cfg.classifier.activation.name = 'relu'
 
-    # loss configuration
-    cfg.classifier_loss_weight = 1.0
-
-    # training configuration
-    # batching and shuffling
-    cfg.train_frac = 0.8
-    cfg.train_batch_size = 1024
-    cfg.num_workers = 4
-
-    # evaluation configuration
-    cfg.eval_batch_size = 1024
-
     # optimizer and scheduler configuration
     cfg.optimizer = config_dict.ConfigDict()
     cfg.optimizer.name = 'AdamW'
@@ -74,9 +74,9 @@ def get_config():
     cfg.scheduler.T_max = 100
 
     # training loop configuration
-    cfg.num_epochs = 100
-    cfg.num_steps = 100000
-    cfg.patience = 50
+    cfg.num_epochs = 1000
+    cfg.num_steps = 1000000
+    cfg.patience = 100
     cfg.monitor = 'val_loss'
     cfg.mode = 'min'
     cfg.grad_clip = 0.5

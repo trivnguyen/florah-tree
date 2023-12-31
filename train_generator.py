@@ -88,6 +88,7 @@ def train(
         d_time = config.d_time,
         d_time_projection = config.d_time_projection,
         d_feat_projection = config.d_feat_projection,
+        classifier_loss_weight=config.classifier_loss_weight,
         num_samples_per_graph=config.num_samples_per_graph,
         norm_dict=norm_dict,
     )

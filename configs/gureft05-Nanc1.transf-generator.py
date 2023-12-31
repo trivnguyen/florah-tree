@@ -21,6 +21,9 @@ def get_config():
     # evaluation configuration
     cfg.eval_batch_size = 1024
 
+    # loss configuration
+    cfg.classifier_loss_weight = 1.0
+
     # model configuration
     cfg.input_size = 3  # number of input features, including time
     cfg.num_classes = 2  # maximum number of ancestors per halo
