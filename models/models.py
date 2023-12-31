@@ -23,6 +23,7 @@ class TransformerFeaturizer(nn.Module):
         nhead,
         num_encoder_layers,
         dim_feedforward,
+        sum_features=False,
         batch_first=True,
         use_embedding=True,
         activation_fn=None,
@@ -38,6 +39,8 @@ class TransformerFeaturizer(nn.Module):
             The number of heads in the multiheadattention models.
         num_encoder_layers : int
             The number of sub-encoder-layers in the encoder.
+        sum_features : bool, optional
+            Whether to sum the features along the sequence dimension. Default: False
         dim_feedforward : int
             The dimension of the feedforward network model.
         batch_first : bool, optional
@@ -54,8 +57,9 @@ class TransformerFeaturizer(nn.Module):
         self.nhead = nhead
         self.num_encoder_layers = num_encoder_layers
         self.dim_feedforward = dim_feedforward
-        self.batch_first = batch_first
+        self.batch_first = True
         self.use_embedding = use_embedding
+        self.sum_features = sum_features
         self.activation_fn = activation_fn
 
         if use_embedding:
@@ -71,7 +75,7 @@ class TransformerFeaturizer(nn.Module):
             d_model=d_model,
             nhead=nhead,
             dim_feedforward=dim_feedforward,
-            batch_first=batch_first
+            batch_first=True
         )
         self.transformer_encoder = TransformerEncoder(
             encoder_layer, num_encoder_layers)
@@ -82,6 +86,17 @@ class TransformerFeaturizer(nn.Module):
             src = self.activation_fn(src)
         output = self.transformer_encoder(
             src, src_key_padding_mask=src_key_padding_mask)
+
+        # NOTE: only work when batch_first=True
+        if self.sum_features:
+            # set all the padding tokens to zero then sum over
+            output = output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
+            output = output.sum(dim=1)
+        else:
+            lengths = src_key_padding_mask.eq(0).sum(dim=1)
+            batch_size = output.shape[0]
+            output = output[torch.arange(batch_size).to(src.device), lengths-1]
+
         return output
 
 

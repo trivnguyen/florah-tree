@@ -17,8 +17,6 @@ class SequenceClassifier(pl.LightningModule):
         The size of the input
     num_classes : int
         The number of classes
-    sum_features : bool
-        Whether to sum the features of the featurizer in the time dimension.
     num_samples_per_graph : int
         The number of samples per graph.
     d_time : int
@@ -46,7 +44,6 @@ class SequenceClassifier(pl.LightningModule):
         classifier_args,
         optimizer_args=None,
         scheduler_args=None,
-        sum_features=False,
         d_time=1,
         d_time_projection=128,
         num_samples_per_graph=1,
@@ -67,9 +64,6 @@ class SequenceClassifier(pl.LightningModule):
             Arguments for the optimizer. Default: None
         scheduler_args : dict, optional
             Arguments for the scheduler. Default: None
-        sum_features : bool, optional
-            Whether to sum the features of the featurizer in the time dimension.
-            Default: False
         d_time : int, optional
             The dimension of the time projection layer. Default: 1
         d_time_projection : int, optional
@@ -83,7 +77,6 @@ class SequenceClassifier(pl.LightningModule):
         super().__init__()
         self.input_size = input_size
         self.num_classes = num_classes
-        self.sum_features = sum_features
         self.num_samples_per_graph = num_samples_per_graph
         self.d_time = d_time
         self.d_time_projection = d_time_projection
@@ -110,6 +103,7 @@ class SequenceClassifier(pl.LightningModule):
                 num_encoder_layers=self.featurizer_args.num_encoder_layers,
                 dim_feedforward=self.featurizer_args.dim_feedforward,
                 batch_first=self.batch_first,
+                sum_features=self.featurizer_args.sum_features,
                 use_embedding=self.featurizer_args.use_embedding,
                 activation_fn=activation_fn,
             )
@@ -181,7 +175,6 @@ class SequenceClassifier(pl.LightningModule):
         # extract the features
         x = self.featurizer(
             padded_features, src_key_padding_mask=transformer_padding_mask)
-        x = x.sum(dim=1) if self.sum_features else x[:, -1]
 
         # project the time and concatenate with the features
         t_out = self.time_proj_layer(t_out)
@@ -210,10 +203,10 @@ class SequenceClassifier(pl.LightningModule):
         # log the loss
         self.log(
             'train_loss', loss, on_step=True, on_epoch=True, logger=True,
-            prog_bar=True, batch_size=batch_dit['batch_size'])
+            prog_bar=True, batch_size=batch_dict['batch_size'])
         self.log(
             'train_acc', acc, on_step=True, on_epoch=True, logger=True,
-            prog_bar=True, batch_size=batch_dit['batch_size'])
+            prog_bar=True, batch_size=batch_dict['batch_size'])
         return loss
 
     def validation_step(self, batch, batch_idx):

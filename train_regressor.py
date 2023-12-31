@@ -34,17 +34,17 @@ def prepare_dataloader(
     # calculate the normaliziation statistics
     if norm_dict is None:
         x = torch.cat([d.x for d in data[:num_train]])
-        x_mean = x.mean(dim=0)
-        x_std = x.std(dim=0)
+        x_loc = x.mean(dim=0)
+        x_scale = x.std(dim=0)
         norm_dict = {
-            "x_mean": list(x_mean.numpy()),
-            "x_std": list(x_std.numpy()),
+            "x_loc": list(x_loc.numpy()),
+            "x_scale": list(x_scale.numpy()),
         }
     else:
-        x_mean = torch.tensor(norm_dict["x_mean"], dtype=torch.float32)
-        x_std = torch.tensor(norm_dict["x_std"], dtype=torch.float32)
+        x_loc = torch.tensor(norm_dict["x_loc"], dtype=torch.float32)
+        x_scale = torch.tensor(norm_dict["x_scale"], dtype=torch.float32)
     for d in data:
-        d.x = (d.x - x_mean) / x_std
+        d.x = (d.x - x_loc) / x_scale
 
     # create data loader
     train_loader = DataLoader(
@@ -108,6 +108,7 @@ def train(
         accelerator=config.accelerator,
         callbacks=callbacks,
         logger=train_logger,
+        enable_progress_bar=False,
     )
 
     # train the model

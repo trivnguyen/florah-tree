@@ -84,7 +84,6 @@ def train(
         classifier_args=config.classifier,
         optimizer_args=config.optimizer,
         scheduler_args=config.scheduler,
-        sum_features=config.sum_features,
         d_time = config.d_time,
         d_time_projection = config.d_time_projection,
         d_feat_projection = config.d_feat_projection,
@@ -111,6 +110,7 @@ def train(
         accelerator=config.accelerator,
         callbacks=callbacks,
         logger=train_logger,
+        enable_progress_bar=False
     )
 
     # train the model
