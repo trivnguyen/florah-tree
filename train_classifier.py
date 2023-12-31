@@ -1,0 +1,131 @@
+
+import os
+import pickle
+import sys
+
+import ml_collections
+import numpy as np
+import pytorch_lightning as pl
+import pytorch_lightning.loggers as pl_loggers
+import torch
+import torch_geometric
+from absl import flags, logging
+from ml_collections import config_flags
+from models import classifier, models, training_utils
+from torch_geometric.data import Data
+from torch_geometric.loader import DataLoader
+from torch_geometric.utils import from_networkx, to_networkx
+
+
+logging.set_verbosity(logging.INFO)
+
+def prepare_dataloader(
+    data: list, config: ml_collections.ConfigDict,
+    norm_dict: dict = None
+):
+    train_frac = config.train_frac
+    train_batch_size = config.train_batch_size
+    eval_batch_size = config.eval_batch_size
+    num_workers = config.num_workers
+
+    np.random.shuffle(data) # shuffle the data
+
+    num_total = len(data)
+    num_train = int(num_total * train_frac)
+
+    # calculate the normaliziation statistics
+    if norm_dict is None:
+        x = torch.cat([d.x for d in data[:num_train]])
+        x_mean = x.mean(dim=0)
+        x_std = x.std(dim=0)
+        norm_dict = {
+            "x_mean": list(x_mean.numpy()),
+            "x_std": list(x_std.numpy()),
+        }
+    else:
+        x_mean = torch.tensor(norm_dict["x_mean"], dtype=torch.float32)
+        x_std = torch.tensor(norm_dict["x_std"], dtype=torch.float32)
+    for d in data:
+        d.x = (d.x - x_mean) / x_std
+
+    # create data loader
+    train_loader = DataLoader(
+        data[:num_train], batch_size=train_batch_size, shuffle=True,
+        num_workers=num_workers, pin_memory=True)
+    val_loader = DataLoader(
+        data[num_train:], batch_size=eval_batch_size, shuffle=False,
+        num_workers=num_workers, pin_memory=True)
+
+    return train_loader, val_loader, norm_dict
+
+
+def train(
+    config: ml_collections.ConfigDict, workdir: str = "./logging/"
+):
+    # load dataset
+    data_path = os.path.join(config.data_root, config.data_name + ".pkl")
+    logging.info("Loading data from {}...".format(data_path))
+
+    with open(data_path, 'rb') as f:
+        data = pickle.load(f)
+    data = [from_networkx(d) for d in data]
+
+    # prepare dataloader
+    logging.info("Preparing dataloader...")
+    train_loader, val_loader, norm_dict = prepare_dataloader(
+        data, config, norm_dict=None)
+
+    # create model
+    # logging.info("Creating model...")
+    model = classifier.SequenceClassifier(
+        input_size=config.input_size,
+        num_classes=config.num_classes,
+        sum_features=config.sum_features,
+        num_samples_per_graph=config.num_samples_per_graph,
+        d_time=config.d_time,
+        d_time_projection=config.d_time_projection,
+        featurizer_args=config.featurizer,
+        classifier_args=config.classifier,
+        optimizer_args=config.optimizer,
+        scheduler_args=config.scheduler,
+        norm_dict=norm_dict,
+    )
+
+    # create the trainer object
+    callbacks = [
+        pl.callbacks.EarlyStopping(
+            monitor=config.monitor, patience=config.patience, mode=config.mode,
+            verbose=True),
+        pl.callbacks.ModelCheckpoint(
+            monitor=config.monitor, save_top_k=config.save_top_k,
+            mode=config.mode, save_weights_only=False),
+        pl.callbacks.LearningRateMonitor("epoch"),
+    ]
+    train_logger = pl_loggers.TensorBoardLogger(workdir, name=config.name)
+    trainer = pl.Trainer(
+        default_root_dir=workdir,
+        max_epochs=config.num_epochs,
+        max_steps=config.num_steps,
+        accelerator=config.accelerator,
+        callbacks=callbacks,
+        logger=train_logger,
+    )
+
+    # train the model
+    logging.info("Training model...")
+    trainer.fit(model, train_loader, val_loader)
+
+
+if __name__ == "__main__":
+    FLAGS = flags.FLAGS
+    config_flags.DEFINE_config_file(
+        "config",
+        None,
+        "File path to the training or sampling hyperparameter configuration.",
+        lock_config=True,
+    )
+    # Parse flags
+    FLAGS(sys.argv)
+
+    # Start training run
+    train(config=FLAGS.config, workdir=FLAGS.config.workdir)
