@@ -108,7 +108,7 @@ def train(
         accelerator=config.accelerator,
         callbacks=callbacks,
         logger=train_logger,
-        enable_progress_bar=False,
+        enable_progress_bar=config.get("enable_progress_bar", True),
     )
 
     # train the model

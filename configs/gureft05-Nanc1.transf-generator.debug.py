@@ -11,6 +11,7 @@ def get_config():
     # logging configuration
     cfg.workdir = './logging/'
     cfg.name = 'GUREFT05-Nanc1.transfGenerator.debug'
+    cfg.enable_progress_bar = False
 
     # training configuration
     # batching and shuffling
