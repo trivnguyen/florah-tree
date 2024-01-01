@@ -89,13 +89,19 @@ class TransformerFeaturizer(nn.Module):
 
         # NOTE: only work when batch_first=True
         if self.sum_features:
-            # set all the padding tokens to zero then sum over
-            output = output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
-            output = output.sum(dim=1)
+            if src_key_padding_mask is None:
+                output = output.sum(dim=1)
+            else:
+                # set all the padding tokens to zero then sum over
+                output = output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
+                output = output.sum(dim=1)
         else:
-            lengths = src_key_padding_mask.eq(0).sum(dim=1)
-            batch_size = output.shape[0]
-            output = output[torch.arange(batch_size).to(src.device), lengths-1]
+            if src_key_padding_mask is None:
+                output = output[:, -1]
+            else:
+                lengths = src_key_padding_mask.eq(0).sum(dim=1)
+                batch_size = output.shape[0]
+                output = output[torch.arange(batch_size).to(src.device), lengths-1]
 
         return output
 

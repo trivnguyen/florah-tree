@@ -209,12 +209,6 @@ class SequenceRegressor(pl.LightningModule):
         # extract the features
         x = self.featurizer(
             padded_features, src_key_padding_mask=transformer_padding_mask)
-        # select all non-padding features
-        x = x.masked_select(
-            transformer_padding_mask.unsqueeze(-1).repeat(1, 1, x.size(-1)))
-
-
-        x = x.sum(dim=1) if self.sum_features else x[:, -1]
 
         # project the time and feature dimensions
         t_proj = self.time_proj_layer(t_out)
