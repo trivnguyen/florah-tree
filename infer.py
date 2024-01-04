@@ -87,9 +87,19 @@ def infer(config: ml_collections.ConfigDict):
     else:
         raise ValueError("Invalid mode: {}".format(config.mode))
 
+
     # Generate trees
     num_batches = int(np.ceil(len(root_features) // config.batch_size))
     for i in range(num_batches):
+        # Save the trees
+        output_path = os.path.join(
+            config.output_root, config.output_name, "trees_{}.pkl".format(i))
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        if config.resume:
+            if os.path.exists(output_path):
+                logging.info("Skipping batch {}/{}...".format(i + 1, num_batches))
+                continue
         logging.info("Generating batch {}/{}...".format(i + 1, num_batches))
         batch_root_features = root_features[i * config.batch_size: (i + 1) * config.batch_size]
         batch_times_out = times_out[i * config.batch_size: (i + 1) * config.batch_size]
@@ -99,12 +109,6 @@ def infer(config: ml_collections.ConfigDict):
             times_out=batch_times_out,
             **generate_args
         )
-
-        # Save the trees
-        output_path = os.path.join(
-            config.output_root, config.output_name, "trees_{}.pkl".format(i))
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
         logging.info("Saving trees to {}...".format(output_path))
         with open(output_path, 'wb') as f:
             pickle.dump(trees, f)
