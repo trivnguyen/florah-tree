@@ -10,8 +10,8 @@ from . import training_utils
 
 
 def generate_tree_A(
-    classifier, regressor, root_halo_feat, t_out, classifier_norm_dict, regressor_norm_dict,
-    n_max_iter=1000, device='cpu'):
+    classifier, regressor, root_halo_feat, t_out, classifier_norm_dict=None,
+    regressor_norm_dict=None, n_max_iter=1000, device='cpu'):
     """Generate a tree using a separate classifier and regressor.
 
     Parameters
@@ -56,14 +56,23 @@ def generate_tree_A(
     root_halo_feat = torch.cat([root_halo_feat, t_out[0].unsqueeze(0)])
 
     # normalization
-    classifier_x_loc = torch.tensor(
-        classifier_norm_dict['x_loc'], dtype=torch.float32, device=device)
-    classifier_x_scale = torch.tensor(
-        classifier_norm_dict['x_scale'], dtype=torch.float32, device=device)
-    regressor_x_loc = torch.tensor(
-        regressor_norm_dict['x_loc'], dtype=torch.float32, device=device)
-    regressor_x_scale = torch.tensor(
-        regressor_norm_dict['x_scale'], dtype=torch.float32, device=device)
+    if classifier_norm_dict is not None:
+        classifier_x_loc = torch.tensor(
+            classifier_norm_dict['x_loc'], dtype=torch.float32, device=device)
+        classifier_x_scale = torch.tensor(
+            classifier_norm_dict['x_scale'], dtype=torch.float32, device=device)
+    else:
+        classifier_x_loc = torch.zeros(num_feat+1, dtype=torch.float32, device=device)
+        classifier_x_scale = torch.ones(num_feat+1, dtype=torch.float32, device=device)
+
+    if regressor_norm_dict is not None:
+        regressor_x_loc = torch.tensor(
+            regressor_norm_dict['x_loc'], dtype=torch.float32, device=device)
+        regressor_x_scale = torch.tensor(
+            regressor_norm_dict['x_scale'], dtype=torch.float32, device=device)
+    else:
+        regressor_x_loc = torch.zeros(num_feat+1, dtype=torch.float32, device=device)
+        regressor_x_scale = torch.ones(num_feat+1, dtype=torch.float32, device=device)
 
     # initialize the tree
     halo_t_index = [0]
@@ -163,13 +172,13 @@ def generate_tree_A(
 
 
 def generate_tree_B(
-    model, root_halo_feat, t_out, n_max_iter=1000, norm_dict=None,
+    generator, root_halo_feat, t_out, n_max_iter=1000, norm_dict=None,
     device='cpu'):
     """Generate a tree using a tree generator model.
 
     Parameters
     ----------
-    model : torch.nn.Module
+    generator : torch.nn.Module
         The tree generator model.
     root_halo_feat : torch.Tensor
         The feature vector of the root halo. The shape should be (n_feat,).
@@ -204,6 +213,16 @@ def generate_tree_B(
     root_halo_feat = root_halo_feat.to(device)
     root_halo_feat = torch.cat([root_halo_feat, t_out[0].unsqueeze(0)])
 
+    # normalization
+    if norm_dict is not None:
+        x_loc = torch.tensor(
+            norm_dict['x_loc'], dtype=torch.float32, device=device)
+        x_scale = torch.tensor(
+            norm_dict['x_scale'], dtype=torch.float32, device=device)
+    else:
+        x_loc = torch.zeros(num_feat + 1, dtype=torch.float32, device=device)
+        x_scale = torch.ones(num_feat + 1, dtype=torch.float32, device=device)
+
     # initialize the tree
     halo_t_index = [0]
     halo_index = [0]
@@ -213,7 +232,7 @@ def generate_tree_B(
     edge_index= [[], []]  # keep edge index as a list to make appending easier
     next_halo_index = 1
 
-    model.eval()
+    generator.eval()
     with torch.no_grad():
         while (len(halo_remain_index) > 0) & (n_max_iter > 0):
             halo_curr_index = halo_remain_index.pop(0)
@@ -223,17 +242,20 @@ def generate_tree_B(
                 continue
             t_next = t_out[halo_curr_t_index + 1]
             t_next = t_next.unsqueeze(0).unsqueeze(0)  # add batch and feature dim
+            t_next = (t_next - x_loc[-1]) / x_scale[-1]
 
             # input features
             path = training_utils.find_path_from_root(
                 torch.tensor(edge_index, dtype=torch.long),
                 halo_curr_index)
-            x_feat = model.featurizer(halo_feats[path].unsqueeze(0)) # add batch dim
-            t_proj = model.time_proj_layer(t_next)
+            x_feat = halo_feats[path]
+            x_feat = (x_feat - x_loc) / x_scale
+            x_feat = generator.featurizer(x_feat.unsqueeze(0)) # add batch dim
+            t_proj = generator.time_proj_layer(t_next)
 
             # randomly sample the number of progenitors
             x_classifier = torch.cat((x_feat, t_proj), dim=1)
-            yhat = model.classifier(x_classifier).softmax(dim=1)
+            yhat = generator.classifier(x_classifier).softmax(dim=1)
             num_progs = torch.multinomial(yhat, 1) + 1
             num_progs = num_progs.item()
 
@@ -245,17 +267,17 @@ def generate_tree_B(
                 n_prog_curr = i_prog + 1  # number of progenitors at current step
 
                 lengths = torch.tensor([n_prog_curr], dtype=torch.long)
-                f_proj = model.feat_proj_layer(x_progs)
+                f_proj = generator.feat_proj_layer(x_progs)
 
                 # run the RNN to extract the context
                 x_rnn = torch.cat([f_proj, t_proj_progs], dim=-1)
-                x_rnn = model.rnn(x_rnn, lengths=lengths)
+                x_rnn = generator.rnn(x_rnn, lengths=lengths)
 
                 # # sample from the flow
                 flow_context = torch.cat(
                     [x_rnn, x_feat.unsqueeze(1).repeat(1, n_prog_curr, 1)], dim=-1)
                 flow_context = flow_context[:, -1]  # only take the last time step
-                x_prog_curr = model.flows.sample(1, context=flow_context)
+                x_prog_curr = generator.flows.sample(1, context=flow_context)
 
                 # append to the list of progenitors
                 x_progs[:, i_prog + 1] = x_prog_curr
@@ -264,6 +286,8 @@ def generate_tree_B(
             # add the progenitors to the list of halos
             x_progs = torch.cat([x_progs, t_next.repeat(1, num_progs, 1)], dim=-1)
             x_progs = x_progs.squeeze(0)  # remove the batch dim
+            x_progs = x_progs * x_scale + x_loc  # unnormalize
+
             halo_feats = torch.cat([halo_feats, x_progs], dim=0)
 
             # create halo index for the progneitors
@@ -282,19 +306,11 @@ def generate_tree_B(
                 print('Max number of iterations reached')
 
     tree = Data(x=halo_feats, edge_index=torch.tensor(edge_index, dtype=torch.long))
-
-    if norm_dict is not None:
-        x_loc_norm = torch.tensor(
-            norm_dict['x_loc'], dtype=torch.float32, device=device)
-        x_scale_norm = torch.tensor(
-            norm_dict['x_scale'], dtype=torch.float32, device=device)
-        tree.x = tree.x * x_scale_norm + x_loc_norm
-
     return tree
 
 
 def generate_forest(
-    root_features, times_out, mode='A', model=None, classifier=None, regressor=None,
+    root_features, times_out, mode='A', generator=None, classifier=None, regressor=None,
     norm_dict=None, classifier_norm_dict=None, regressor_norm_dict=None,
     n_max_iter=100, device='cpu', verbose=True):
     """ Generate multiple trees
@@ -315,10 +331,10 @@ def generate_forest(
             'classifier_norm_dict': classifier_norm_dict,
             'regressor_norm_dict': regressor_norm_dict}
     elif mode == 'B':
-        if model is None:
+        if generator is None:
             raise ValueError('model must be provided for mode B')
         generator_fn = generate_tree_B
-        generator_kwargs = {'model': model, 'norm_dict': norm_dict}
+        generator_kwargs = {'generator': generator, 'norm_dict': norm_dict}
     else:
         raise ValueError(f'Invalid mode {mode}')
 
