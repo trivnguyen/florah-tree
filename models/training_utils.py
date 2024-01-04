@@ -19,10 +19,12 @@ def find_path_from_root(edge_index, node):
     return path_tensor
 
 def find_ancestor_indices(edge_index, node):
-    # Find indices where the selected node is the target
+    # Find indices where the selected node is the descendant halo
     ancestor_indices = (edge_index[0] == node).nonzero(as_tuple=True)[0]
 
-    # Get the source nodes for these edges, i.e., the ancestors
+    # Get the ancestors of the selected node
+    # (i.e., the halos at the next snapshots that are connected to the
+    # selected node)
     ancestors = edge_index[1][ancestor_indices]
 
     return ancestors
