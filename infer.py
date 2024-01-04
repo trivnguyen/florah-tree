@@ -17,6 +17,8 @@ from models.classifier import SequenceClassifier
 from models.regressor import SequenceRegressor
 from models.generator import TreeGenerator
 
+logging.set_verbosity(logging.INFO)
+
 def infer(config: ml_collections.ConfigDict):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -28,23 +30,35 @@ def infer(config: ml_collections.ConfigDict):
         sim_data = pickle.load(f)
     sim_data = [from_networkx(d) for d in sim_data]
 
-    root_features = []
-    times_out = []
+    # get the root features and times
+    if config.fixed_time_steps:
+        logging.info(
+            "Using fixed time steps. Will assume all trees have the same time steps.")
 
-    # create progress bar
-    loop = tqdm(
-        range(len(sim_data)),
-        desc="Loading the roots and main branches of the simulation")
-    for i in loop:
-        sim_tree = sim_data[i]
+        root_features = [sim_data[i].x[0, :-1] for i in range(len(sim_data))]
+
+        # assume the time to be all the same
         sim_main_index = analysis_utils.get_main_branch(
-            sim_tree.x[:, 0], sim_tree.edge_index)
-        sim_main_feats = sim_tree.x[sim_main_index]
-        sim_aexp = sim_main_feats[..., -1]
-        sim_root_feat = sim_tree.x[0, :-1]
+            sim_data[0].x[:, 0], sim_data[0].edge_index)
+        sim_aexp = sim_data[0].x[sim_main_index, -1]
+        times_out = [sim_aexp] * config.num_trees_per_sim * len(sim_data)
+    else:
+        logging.info(
+            "Using variable time steps. Will assume each tree has different time steps.")
 
-        root_features = root_features + [sim_root_feat] * config.num_trees_per_sim
-        times_out = times_out + [sim_aexp] * config.num_trees_per_sim
+        root_features = []
+        times_out = []
+
+        # create progress bar
+        loop = tqdm(
+            range(len(sim_data)),
+            desc="Loading the roots and main branches of the simulation")
+        for i in loop:
+            sim_tree = sim_data[i]
+            sim_root_feat = sim_tree.x[0, :-1]
+            sim_aexp = torch.unique(sim_tree.x[:, -1])
+            root_features = root_features + [sim_root_feat] * config.num_trees_per_sim
+            times_out = times_out + [sim_aexp] * config.num_trees_per_sim
 
     # Read in the model
     if config.mode.upper() == 'A':
