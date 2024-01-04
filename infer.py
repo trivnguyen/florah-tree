@@ -32,7 +32,9 @@ def infer(config: ml_collections.ConfigDict):
     times_out = []
 
     # create progress bar
-    loop = tqdm(len(sim_data), desc="Generating trees")
+    loop = tqdm(
+        range(len(sim_data)),
+        desc="Loading the roots and main branches of the simulation")
     for i in loop:
         sim_tree = sim_data[i]
         sim_main_index = analysis_utils.get_main_branch(
