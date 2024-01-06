@@ -63,11 +63,22 @@ def train(
     config: ml_collections.ConfigDict, workdir: str = "./logging/"
 ):
     # load dataset
-    data_path = os.path.join(config.data_root, config.data_name + ".pkl")
-    logging.info("Loading data from {}...".format(data_path))
-
-    with open(data_path, 'rb') as f:
-        data = pickle.load(f)
+    if config.get("is_directory", False):
+        data = []
+        data_dir = os.path.join(config.data_root, config.data_name)
+        for i in range(config.get("max_num_files", 100)):
+            data_path = os.path.join(data_dir, "data.{}.pkl".format(i))
+            logging.info("Loading data from {}...".format(data_path))
+            if os.path.exists(data_path):
+                with open(data_path, 'rb') as f:
+                    data += pickle.load(f)
+            else:
+                break
+    else:
+        data_path = os.path.join(config.data_root, config.data_name + ".pkl")
+        logging.info("Loading data from {}...".format(data_path))
+        with open(data_path, 'rb') as f:
+           data = pickle.load(f)
     data = [from_networkx(d) for d in data]
 
     # prepare dataloader
