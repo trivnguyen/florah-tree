@@ -56,7 +56,7 @@ def infer(config: ml_collections.ConfigDict):
         for i in loop:
             sim_tree = sim_data[i]
             sim_root_feat = sim_tree.x[0, :-1]
-            sim_aexp = torch.unique(sim_tree.x[:, -1])
+            sim_aexp = torch.unique(sim_tree.x[:, -1]).flip(0)
             root_features = root_features + [sim_root_feat] * config.num_trees_per_sim
             times_out = times_out + [sim_aexp] * config.num_trees_per_sim
 
