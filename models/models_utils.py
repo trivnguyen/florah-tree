@@ -1,6 +1,7 @@
 
 import torch
 import torch.nn as nn
+import math
 
 def get_activation(activation):
     """ Get an activation function. """
@@ -18,3 +19,17 @@ def get_activation(activation):
         return nn.GELU()
     else:
         raise ValueError(f'Unknown activation function: {activation.name}')
+
+class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):
+    def __init__(self, optimizer, decay_steps, warmup_steps, eta_min=0, last_epoch=-1):
+        self.decay_steps = decay_steps
+        self.warmup_steps = warmup_steps
+        self.eta_min = eta_min
+        super().__init__(
+            optimizer, self.lr_lambda, last_epoch=last_epoch)
+
+    def lr_lambda(self, step):
+        if step < self.warmup_steps:
+            return float(step) / float(max(1, self.warmup_steps))
+        return self.eta_min + (
+            0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - warmup_steps))))

@@ -293,7 +293,14 @@ class SequenceRegressor(pl.LightningModule):
                 patience=self.scheduler_args.patience)
         elif self.scheduler_args.name == 'CosineAnnealingLR':
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=self.scheduler_args.T_max,)
+                optimizer, T_max=self.scheduler_args.T_max,
+                eta_min=self.scheduler_args.eta_min)
+        elif self.scheduler_args.name == 'WarmUpCosineAnnealingLR':
+            scheduler = models_utils.WarmUpCosineAnnealingLR(
+                optimizer,
+                decay_steps=self.scheduler_args.decay_steps,
+                warmup_steps=self.scheduler_args.warmup_steps,
+                eta_min=self.scheduler_args.eta_min)
         else:
             raise NotImplementedError(
                 "Scheduler {} not implemented".format(self.scheduler_args.name))
@@ -306,7 +313,8 @@ class SequenceRegressor(pl.LightningModule):
                 'lr_scheduler': {
                     'scheduler': scheduler,
                     'monitor': 'train_loss',
-                    'interval': 'epoch',
+                    'interval': self.scheduler_args.interval,
                     'frequency': 1
                 }
             }
+
