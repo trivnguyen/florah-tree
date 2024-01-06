@@ -345,7 +345,12 @@ def generate_forest(
     root_halo_range = range(len(root_features))
 
     # Use tqdm for progress tracking if verbose is True
-    loop = tqdm(root_halo_range, desc="Generating trees") if verbose else root_halo_range
+    if verbose:
+        loop = tqdm(
+            root_halo_range, desc="Generating trees",
+            miniters=len(root_features) // 100)
+    else:
+        loop = root_halo_range
 
     for i in loop:
         root_halo_feat = root_features[i]
