@@ -3,6 +3,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import networkx as nx
+from torch_geometric.data import Data
+from torch_geometric.utils import from_networkx
 from networkx.drawing.nx_pydot import graphviz_layout
 
 def convert_to_nx(data):
@@ -52,6 +54,9 @@ def create_nx_graph(halo_id, halo_desc_id, halo_props=None):
 
 
 def plot_graph(G, fig_args=None, draw_args=None):
+    if isinstance(G, Data):
+        G = convert_to_nx(G)
+
     pos = graphviz_layout(G, prog='dot')
     fig_args = fig_args or {}
     draw_args = draw_args or {}
@@ -67,6 +72,36 @@ def plot_graph(G, fig_args=None, draw_args=None):
     nx.draw(G, pos, ax=ax, **default_draw_args)
     ax.set_title("Merger Tree Graph")
     return fig, ax
+
+
+def dfs(edge_index, start_node=0):
+    """ Perform a depth-first search on the graph and return the order of nodes """
+    # Convert edge_index to a graph representation
+    graph = {}
+    for i in range(edge_index.size(1)):
+        src, dest = edge_index[:, i].tolist()
+        if src in graph:
+            graph[src].add(dest)
+        else:
+            graph[src] = {dest}
+        if dest in graph:
+            graph[dest].add(src)
+        else:
+            graph[dest] = {src}
+
+    # DFS algorithm
+    def dfs_visit(node, visited):
+        visited.add(node)
+        order.append(node)
+        for neighbor in graph.get(node, []):
+            if neighbor not in visited:
+                dfs_visit(neighbor, visited)
+
+    visited = set()
+    order = []
+    dfs_visit(start_node, visited)
+    return order
+
 
 def get_main_branch(mass, edge_index):
     # follow the main branch and get index
