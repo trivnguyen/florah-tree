@@ -22,43 +22,63 @@ logging.set_verbosity(logging.INFO)
 def infer(config: ml_collections.ConfigDict):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load in the dataset and extract the root features and times
-    data_path = os.path.join(config.data_root, config.data_name + ".pkl")
-    logging.info("Loading data from {}...".format(data_path))
+    if config.data_fmt == 'pickle':
 
-    with open(data_path, 'rb') as f:
-        sim_data = pickle.load(f)
-    sim_data = [from_networkx(d) for d in sim_data]
+        # Load in the dataset and extract the root features and times
+        data_path = os.path.join(config.data_root, config.data_name + ".pkl")
+        logging.info("Loading data from {}...".format(data_path))
 
-    # get the root features and times
-    if config.fixed_time_steps:
-        logging.info(
-            "Using fixed time steps. Will assume all trees have the same time steps.")
+        with open(data_path, 'rb') as f:
+            sim_data = pickle.load(f)
+        sim_data = [from_networkx(d) for d in sim_data]
 
-        root_features = [sim_data[i].x[0, :-1] for i in range(len(sim_data))]
+        # get the root features and times
+        if config.fixed_time_steps:
+            logging.info(
+                "Using fixed time steps. Will assume all trees have the same time steps.")
 
-        # assume the time to be all the same
-        sim_main_index = analysis_utils.get_main_branch(
-            sim_data[0].x[:, 0], sim_data[0].edge_index)
-        sim_aexp = sim_data[0].x[sim_main_index, -1]
-        times_out = [sim_aexp] * config.num_trees_per_sim * len(sim_data)
-    else:
-        logging.info(
-            "Using variable time steps. Will assume each tree has different time steps.")
+            root_features = [sim_data[i].x[0, :-1] for i in range(len(sim_data))]
 
+            # assume the time to be all the same
+            sim_main_index = analysis_utils.get_main_branch(
+                sim_data[0].x[:, 0], sim_data[0].edge_index)
+            sim_aexp = sim_data[0].x[sim_main_index, -1]
+            times_out = [sim_aexp] * config.num_trees_per_sim * len(sim_data)
+        else:
+            logging.info(
+                "Using variable time steps. Will assume each tree has different time steps.")
+
+            root_features = []
+            times_out = []
+
+            # create progress bar
+            loop = tqdm(
+                range(len(sim_data)),
+                desc="Loading the roots and main branches of the simulation")
+            for i in loop:
+                sim_tree = sim_data[i]
+                sim_root_feat = sim_tree.x[0, :-1]
+                sim_aexp = torch.unique(sim_tree.x[:, -1]).flip(0)
+                root_features = root_features + [sim_root_feat] * config.num_trees_per_sim
+                times_out = times_out + [sim_aexp] * config.num_trees_per_sim
+
+    elif config.data_fmt == 'txt':
+        # read the snapshot times
+        times_out = np.genfromtxt(
+            os.path.join(config.data_root, config.data_name, "snapshot_times.txt"))
         root_features = []
-        times_out = []
+        for i in range(config.num_files):
+            data_path = os.path.join(
+                config.data_root, config.data_name,
+                "data.{}.txt".format(i + config.num_files_start)
+            )
+            root_features.append(np.genfromtxt(data_path))
+        root_features = np.concatenate(root_features, axis=0)
 
-        # create progress bar
-        loop = tqdm(
-            range(len(sim_data)),
-            desc="Loading the roots and main branches of the simulation")
-        for i in loop:
-            sim_tree = sim_data[i]
-            sim_root_feat = sim_tree.x[0, :-1]
-            sim_aexp = torch.unique(sim_tree.x[:, -1]).flip(0)
-            root_features = root_features + [sim_root_feat] * config.num_trees_per_sim
-            times_out = times_out + [sim_aexp] * config.num_trees_per_sim
+        # convert to torch tensors
+        root_features = torch.tensor(root_features, dtype=torch.float32)
+        times_out = torch.tensor(times_out, dtype=torch.float32)
+        times_out = times_out.unsqueeze(0).repeat(len(root_features), 1)
 
     # Read in the model
     if config.mode.upper() == 'A':
@@ -87,13 +107,12 @@ def infer(config: ml_collections.ConfigDict):
     else:
         raise ValueError("Invalid mode: {}".format(config.mode))
 
-
     # Generate trees
     num_batches = int(np.ceil(len(root_features) // config.batch_size))
     for i in range(num_batches):
         # Save the trees
         output_path = os.path.join(
-            config.output_root, config.output_name, "trees_{}.pkl".format(i))
+            config.output_root, config.output_name, "trees_{}.pkl".format(i + config.output_start))
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         if config.resume:
