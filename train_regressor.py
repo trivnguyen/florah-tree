@@ -116,7 +116,7 @@ def train(
     trainer = pl.Trainer(
         default_root_dir=workdir,
         max_epochs=config.num_epochs,
-        max_steps=config.num_steps,
+        # max_steps=config.num_steps,  # temporary remove because a weird resume bug in pl
         accelerator=config.accelerator,
         callbacks=callbacks,
         logger=train_logger,
@@ -125,8 +125,10 @@ def train(
 
     # train the model
     logging.info("Training model...")
-    trainer.fit(model, train_loader, val_loader)
-
+    trainer.fit(
+        model, train_loader, val_loader,
+        ckpt_path=config.get("checkpoint_path", None),
+    )
 
 if __name__ == "__main__":
     FLAGS = flags.FLAGS
