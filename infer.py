@@ -67,11 +67,9 @@ def infer(config: ml_collections.ConfigDict):
         times_out = np.genfromtxt(
             os.path.join(config.data_root, config.data_name, "snapshot_times.txt"))
         root_features = []
-        for i in range(config.num_files):
+        for i in range(config.num_files_start, config.num_files_end):
             data_path = os.path.join(
-                config.data_root, config.data_name,
-                "data.{}.txt".format(i + config.num_files_start)
-            )
+                config.data_root, config.data_name, "data.{}.txt".format(i))
             root_features.append(np.genfromtxt(data_path))
         root_features = np.concatenate(root_features, axis=0)
 
@@ -108,11 +106,21 @@ def infer(config: ml_collections.ConfigDict):
         raise ValueError("Invalid mode: {}".format(config.mode))
 
     # Generate trees
+    # Divide the data into jobs then batches
+    num_roots = len(root_features)
+    num_roots_per_job = int(np.ceil(num_roots / config.num_jobs))
+    job_start = config.job_id * num_roots_per_job
+    job_end = min((config.job_id + 1) * num_roots_per_job, num_roots)
+    root_features = root_features[job_start: job_end]
+    times_out = times_out[job_start: job_end]
+
+    output_start = int(np.ceil(job_start / config.batch_size))
+
     num_batches = int(np.ceil(len(root_features) // config.batch_size))
     for i in range(num_batches):
         # Save the trees
         output_path = os.path.join(
-            config.output_root, config.output_name, "trees_{}.pkl".format(i + config.output_start))
+            config.output_root, config.output_name, "trees_{}.pkl".format(i + output_start))
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         if config.resume:
