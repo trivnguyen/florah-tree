@@ -270,51 +270,5 @@ class SequenceRegressor(pl.LightningModule):
 
     def configure_optimizers(self):
         """ Initialize optimizer and LR scheduler """
-
-        # setup the optimizer
-        if self.optimizer_args.name == "Adam":
-            return torch.optim.Adam(
-                self.parameters(), lr=self.optimizer_args.lr,
-                weight_decay=self.optimizer_args.weight_decay)
-        elif self.optimizer_args.name == "AdamW":
-            return torch.optim.AdamW(
-                self.parameters(), lr=self.optimizer_args.lr,
-                weight_decay=self.optimizer_args.weight_decay)
-        else:
-            raise NotImplementedError(
-                "Optimizer {} not implemented".format(self.optimizer_args.name))
-
-        # setup the scheduler
-        if self.scheduler_args.get(name) is None:
-            scheduler = None
-        elif self.scheduler_args.name == 'ReduceLROnPlateau':
-            scheduler =  torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, 'min', factor=self.scheduler_args.factor,
-                patience=self.scheduler_args.patience)
-        elif self.scheduler_args.name == 'CosineAnnealingLR':
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=self.scheduler_args.T_max,
-                eta_min=self.scheduler_args.eta_min)
-        elif self.scheduler_args.name == 'WarmUpCosineAnnealingLR':
-            scheduler = models_utils.WarmUpCosineAnnealingLR(
-                optimizer,
-                decay_steps=self.scheduler_args.decay_steps,
-                warmup_steps=self.scheduler_args.warmup_steps,
-                eta_min=self.scheduler_args.eta_min)
-        else:
-            raise NotImplementedError(
-                "Scheduler {} not implemented".format(self.scheduler_args.name))
-
-        if scheduler is None:
-            return optimizer
-        else:
-            return {
-                'optimizer': optimizer,
-                'lr_scheduler': {
-                    'scheduler': scheduler,
-                    'monitor': 'train_loss',
-                    'interval': self.scheduler_args.interval,
-                    'frequency': 1
-                }
-            }
-
+        return model_utils.configure_optimizers(
+            self.optimizer_args, self.scheduler_args)

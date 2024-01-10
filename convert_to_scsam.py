@@ -11,6 +11,7 @@ import networkx as nx
 import torch
 import torch.nn as nn
 import torch_geometric
+from tqdm import tqdm
 from torch_geometric.utils import from_networkx, to_networkx
 from torch_geometric.data import Data, Batch
 from ml_collections import config_dict
@@ -55,6 +56,7 @@ if __name__ == '__main__':
     os.makedirs(output_root / "output", exist_ok=True)
 
     # check if data_path is directory or file
+    print(f'Reading {num_max_files} files from {data_path}')
     if os.path.isdir(data_path):
         trees = []
         for i in range(num_max_files):
@@ -70,7 +72,11 @@ if __name__ == '__main__':
         trees = [from_networkx(tree) for tree in trees]
 
     # convert all trees to depth-first search order
-    for tree in trees:
+    loop = tqdm(range(len(trees)), desc='Converting to DFS order')
+
+    for itree in loop:
+        loop.set_description(f'Converting to DFS order (tree {itree})')
+        tree = trees[itree]
         edge_index = tree.edge_index
         order = analysis_utils.dfs(edge_index)
         tree.x = tree.x[order]
@@ -79,7 +85,6 @@ if __name__ == '__main__':
 
     # get the snapshot times of the box
     snaps, aexp_snaps, redshift_snaps = utils.read_snapshot_times(box_name)
-
 
     # Start converting to ConsistentTree format
     # use PyG Batch to store all trees, very convenient for this application
@@ -127,9 +132,11 @@ if __name__ == '__main__':
     with open(output_path, 'w') as f:
         f.writelines(f"{str(num_trees_write)} \n")
         iline = 0
-        for itree in range(num_trees_write):
+
+        loop = tqdm(range(num_trees_write), desc='Writing to file')
+        for itree in loop:
+            loop.set_description(f'Writing to file (tree {itree})')
             f.writelines(f"#tree {itree}\n")
             for iline in range(forest.ptr[itree], forest.ptr[itree+1]):
                 string = to_string(ct_data[iline], PROPS_FMT, PROPS_TYPE)
                 f.writelines(string)
-            print(itree)
