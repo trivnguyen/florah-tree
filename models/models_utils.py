@@ -53,7 +53,7 @@ def configure_optimizers(optimizer_args, scheduler_args=None):
             "Optimizer {} not implemented".format(optimizer_args.name))
 
     # setup the scheduler
-    if scheduler_args.get(name) is None:
+    if scheduler_args.name is None:
         scheduler = None
     elif scheduler_args.name == 'ReduceLROnPlateau':
         scheduler =  torch.optim.lr_scheduler.ReduceLROnPlateau(
