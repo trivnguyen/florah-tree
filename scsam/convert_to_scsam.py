@@ -48,40 +48,49 @@ if __name__ == '__main__':
 
     # settings
     box_name = 'vsmdpl'
-    output_root = Path('/mnt/ceph/users/tnguyen/florah/sc-sam/florah-tree/vsmdpl-nanc2')
-    output_name = 'data'
-    data_path = '/mnt/ceph/users/tnguyen/florah/generated_dataset/fixed-time-steps/VSMDPL-Nanc2'
+    output_root = Path('/mnt/ceph/users/tnguyen/florah/sc-sam/florah-tree/vsmdpl-nanc2-B')
+    output_name = 'gen'
+    data_path = '/mnt/ceph/users/tnguyen/florah/generated_dataset/fixed-time-steps/VSMDPL-Nanc2-B'
+    # data_path = '/mnt/ceph/users/tnguyen/florah/datasets/experiments/fixed-time-steps/VSMDPL-Nanc2'
     num_max_files = 10
+    num_max_nodes = 5000
+    num_max_trees = 10000
+    prefix = 'trees_'
+    is_dfs = False
     os.makedirs(output_root / "input", exist_ok=True)
     os.makedirs(output_root / "output", exist_ok=True)
 
     # check if data_path is directory or file
-    print(f'Reading {num_max_files} files from {data_path}')
     if os.path.isdir(data_path):
+        print(f'Reading {num_max_files} files from {data_path}')
         trees = []
         for i in range(num_max_files):
-            tree_path = os.path.join(data_path, f'trees_{i}.pkl')
+            tree_path = os.path.join(data_path, f'{prefix}{i}.pkl')
             if os.path.exists(tree_path):
                 with open(tree_path, 'rb') as f:
                     trees += pickle.load(f)
     else:
         with open(data_path, 'rb') as f:
             trees = pickle.load(f)
+    trees = trees[:num_max_trees]
 
     if isinstance(trees[0], nx.DiGraph):
         trees = [from_networkx(tree) for tree in trees]
 
-    # convert all trees to depth-first search order
-    loop = tqdm(range(len(trees)), desc='Converting to DFS order')
+    # remove trees with too many nodes
+    trees = [tree for tree in trees if len(tree.x) <= num_max_nodes]
 
-    for itree in loop:
-        loop.set_description(f'Converting to DFS order (tree {itree})')
-        tree = trees[itree]
-        edge_index = tree.edge_index
-        order = analysis_utils.dfs(edge_index)
-        tree.x = tree.x[order]
-        tree.edge_index = torch.tensor(
-            [[order.index(i) for i in edge_index[0]], [order.index(i) for i in edge_index[1]]])
+    # convert all trees to depth-first search order
+    if not is_dfs:
+        loop = tqdm(range(len(trees)), desc='Converting to DFS order')
+        for itree in loop:
+            loop.set_description(f'Converting to DFS order (tree {itree})')
+            tree = trees[itree]
+            edge_index = tree.edge_index
+            order = analysis_utils.dfs(edge_index)
+            tree.x = tree.x[order]
+            tree.edge_index = torch.tensor(
+                [[order.index(i) for i in edge_index[0]], [order.index(i) for i in edge_index[1]]])
 
     # get the snapshot times of the box
     snaps, aexp_snaps, redshift_snaps = utils.read_snapshot_times(box_name)
