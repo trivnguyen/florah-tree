@@ -4,7 +4,10 @@ import os
 import h5py
 import pickle
 import time
+import sys
 from pathlib import Path
+
+sys.path.append('../')
 
 import numpy as np
 import networkx as nx
