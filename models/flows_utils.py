@@ -7,7 +7,8 @@ from nflows import distributions, flows, transforms
 
 def build_maf(
         features: int, hidden_features: int, context_features: int,
-        num_layers: int, num_blocks: int, activation_fn: callable = nn.Tanh()
+        num_layers: int, num_blocks: int, activation_fn: callable = nn.Tanh(),
+        batch_norm: bool = True
     ) -> flows.Flow:
     """ Build a MAF normalizing flow
 
@@ -45,7 +46,7 @@ def build_maf(
                         random_mask=False,
                         activation=activation_fn,
                         dropout_probability=0.0,
-                        use_batch_norm=True,
+                        use_batch_norm=batch_norm,
                     ),
                     transforms.RandomPermutation(features=features),
                 ]
