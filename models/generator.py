@@ -141,7 +141,8 @@ class TreeGenerator(pl.LightningModule):
 
     def _prepare_batch(self, batch):
         """ Prepare the batch for training. """
-        batch  = training_utils.prepare_batch(batch, num_samples_per_graph=1)
+        batch  = training_utils.prepare_batch(
+            batch, num_samples_per_graph=self.num_samples_per_graph)
         padded_features = batch[0]
         lengths = batch[1]
         padded_out_features = batch[2]
