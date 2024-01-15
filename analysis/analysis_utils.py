@@ -70,7 +70,6 @@ def plot_graph(G, fig_args=None, draw_args=None):
     )
     default_draw_args.update(draw_args)
     nx.draw(G, pos, ax=ax, **default_draw_args)
-    ax.set_title("Merger Tree Graph")
     return fig, ax
 
 

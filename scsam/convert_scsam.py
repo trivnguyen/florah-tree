@@ -4,6 +4,7 @@ import os
 import h5py
 import pickle
 import time
+import glob
 import sys
 from pathlib import Path
 
@@ -17,7 +18,8 @@ import torch_geometric
 from tqdm import tqdm
 from torch_geometric.utils import from_networkx, to_networkx
 from torch_geometric.data import Data, Batch
-from ml_collections import config_dict
+from absl import flags
+from ml_collections import config_dict, config_flags
 
 from florah_analysis import utils
 from analysis import analysis_utils
@@ -46,57 +48,58 @@ def to_string(data, fmts, types):
     string += '\n'
     return string.format(*new_data)
 
+def convert_scsam(config: config_dict.ConfigDict):
+    ''' Convert the trees to SC-SAM format '''
 
-if __name__ == '__main__':
+    print('Converting trees to SC-SAM format ...')
 
-    # settings
-    box_name = 'vsmdpl'
-    output_root = Path('/mnt/ceph/users/tnguyen/florah/sc-sam/florah-tree/vsmdpl-nanc2-B')
-    output_name = 'gen'
-    data_path = '/mnt/ceph/users/tnguyen/florah/generated_dataset/fixed-time-steps/VSMDPL-Nanc2-B'
-    # data_path = '/mnt/ceph/users/tnguyen/florah/datasets/experiments/fixed-time-steps/VSMDPL-Nanc2'
-    num_max_files = 10
-    num_max_nodes = 5000
-    num_max_trees = 10000
-    prefix = 'trees_'
-    is_dfs = False
-    os.makedirs(output_root / "input", exist_ok=True)
-    os.makedirs(output_root / "output", exist_ok=True)
+    # create a work directory and copy the config file there
+    workdir = Path(os.path.join(config.workdir, config.name))
+    input_dir = os.path.join(workdir, "input")
+    output_dir = os.path.join(workdir, "output/")  # the slash is IMPORTANT. DO NOT REMOVE
 
     # check if data_path is directory or file
+    data_path = os.path.join(config.data_root, config.data_name)
     if os.path.isdir(data_path):
-        print(f'Reading {num_max_files} files from {data_path}')
+        print(f'Reading {config.num_max_files} files from {data_path}')
         trees = []
-        for i in range(num_max_files):
-            tree_path = os.path.join(data_path, f'{prefix}{i}.pkl')
-            if os.path.exists(tree_path):
-                with open(tree_path, 'rb') as f:
+        tree_paths = glob.glob(os.path.join(data_path, f'*.pkl'))
+        tree_paths = sorted(tree_paths, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+        for i in range(config.num_max_files):
+            if os.path.exists(tree_paths[i]):
+                with open(tree_paths[i], 'rb') as f:
                     trees += pickle.load(f)
     else:
         with open(data_path, 'rb') as f:
             trees = pickle.load(f)
-    trees = trees[:num_max_trees]
 
     if isinstance(trees[0], nx.DiGraph):
         trees = [from_networkx(tree) for tree in trees]
 
     # remove trees with too many nodes
-    trees = [tree for tree in trees if len(tree.x) <= num_max_nodes]
+    trees = [tree for tree in trees if len(tree.x) <= config.num_max_nodes]
+
+    trees = trees[:config.num_max_trees]
 
     # convert all trees to depth-first search order
-    if not is_dfs:
-        loop = tqdm(range(len(trees)), desc='Converting to DFS order')
+    if not config.is_dfs:
+        loop = tqdm(range(len(trees)))
         for itree in loop:
             loop.set_description(f'Converting to DFS order (tree {itree})')
             tree = trees[itree]
-            edge_index = tree.edge_index
-            order = analysis_utils.dfs(edge_index)
+            order = analysis_utils.dfs(tree.edge_index)
+
+            # convert edge_index to DFS orders
+            old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(order)}
+            edge_index_dfs = torch.tensor(
+                [old_to_new[node.item()] for node in tree.edge_index.view(-1)])
+            edge_index_dfs = edge_index_dfs.view(2, -1)
+
             tree.x = tree.x[order]
-            tree.edge_index = torch.tensor(
-                [[order.index(i) for i in edge_index[0]], [order.index(i) for i in edge_index[1]]])
+            tree.edge_index = edge_index_dfs
 
     # get the snapshot times of the box
-    snaps, aexp_snaps, redshift_snaps = utils.read_snapshot_times(box_name)
+    snaps, aexp_snaps, redshift_snaps = utils.read_snapshot_times(config.box_name)
 
     # Start converting to ConsistentTree format
     # use PyG Batch to store all trees, very convenient for this application
@@ -139,16 +142,36 @@ if __name__ == '__main__':
     ct_data = np.stack(ct_data, axis=1)
 
     # Write to file
-    num_trees_write = len(forest)
-    output_path = output_root / "input" / f"{output_name}.dat"
-    with open(output_path, 'w') as f:
-        f.writelines(f"{str(num_trees_write)} \n")
-        iline = 0
+    num_trees_total = len(forest)
+    num_trees_per_file = config.num_trees_per_file
+    num_files = int(np.ceil(num_trees_total / num_trees_per_file))
+    for ifile in range(num_files):
+        output_path = os.path.join(input_dir, f"trees_{ifile}.dat")
+        with open(output_path, 'w') as f:
+            num_trees_write = min(num_trees_per_file, num_trees_total - ifile * num_trees_per_file)
+            f.writelines(f"{str(num_trees_write)} \n")
+            loop = tqdm(range(num_trees_write))
+            for itree in loop:
+                loop.set_description(f'Writing to file (tree {itree})')
+                f.writelines(f"#tree {itree}\n")
+                for iline in range(forest.ptr[itree], forest.ptr[itree+1]):
+                    string = to_string(ct_data[iline], PROPS_FMT, PROPS_TYPE)
+                    f.writelines(string)
 
-        loop = tqdm(range(num_trees_write), desc='Writing to file')
-        for itree in loop:
-            loop.set_description(f'Writing to file (tree {itree})')
-            f.writelines(f"#tree {itree}\n")
-            for iline in range(forest.ptr[itree], forest.ptr[itree+1]):
-                string = to_string(ct_data[iline], PROPS_FMT, PROPS_TYPE)
-                f.writelines(string)
+    print(f"Converted {num_trees_total} trees to ConsistentTrees format")
+    print(f"Output directory: {input_dir}")
+    print(f"Done!")
+
+if __name__ == '__main__':
+    FLAGS = flags.FLAGS
+    config_flags.DEFINE_config_file(
+        "config",
+        None,
+        "File path to SC-SAM configuration.",
+        lock_config=True,
+    )
+    # Parse flags
+    FLAGS(sys.argv)
+
+    # Start training run
+    convert_scsam(config=FLAGS.config)
