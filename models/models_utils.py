@@ -35,18 +35,18 @@ def get_activation(activation):
     else:
         raise ValueError(f'Unknown activation function: {activation.name}')
 
-def configure_optimizers(optimizer_args, scheduler_args=None):
+def configure_optimizers(parameters, optimizer_args, scheduler_args=None):
     """ Return optimizer and scheduler for Pytorch Lightning """
     scheduler_args = scheduler_args or {}
 
     # setup the optimizer
     if optimizer_args.name == "Adam":
         return torch.optim.Adam(
-            parameters(), lr=optimizer_args.lr,
+            parameters, lr=optimizer_args.lr,
             weight_decay=optimizer_args.weight_decay)
     elif optimizer_args.name == "AdamW":
         return torch.optim.AdamW(
-            parameters(), lr=optimizer_args.lr,
+            parameters, lr=optimizer_args.lr,
             weight_decay=optimizer_args.weight_decay)
     else:
         raise NotImplementedError(

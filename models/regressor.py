@@ -271,8 +271,8 @@ class SequenceRegressor(pl.LightningModule):
 
     def configure_optimizers(self):
         """ Initialize optimizer and LR scheduler """
-        return model_utils.configure_optimizers(
-            self.optimizer_args, self.scheduler_args)
+        return models_utils.configure_optimizers(
+            self.parameters(), self.optimizer_args, self.scheduler_args)
 
 
 class SequenceRegressorMultiFlows(pl.LightningModule):
@@ -472,5 +472,5 @@ class SequenceRegressorMultiFlows(pl.LightningModule):
 
     def configure_optimizers(self):
         """ Initialize optimizer and LR scheduler """
-        return model_utils.configure_optimizers(
-            self.optimizer_args, self.scheduler_args)
+        return models_utils.configure_optimizers(
+            self.parameters(), self.optimizer_args, self.scheduler_args)
