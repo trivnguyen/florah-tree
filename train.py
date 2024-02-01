@@ -11,7 +11,7 @@ import torch
 import torch_geometric
 from absl import flags, logging
 from ml_collections import config_flags
-from models import generator, models, training_utils
+from models import generator, models, utils, training_utils
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import from_networkx, to_networkx
@@ -60,7 +60,7 @@ def prepare_dataloader(
 def get_model(config, norm_dict=None):
     """ Get the model from config file """
 
-    if config.model_name = "TreeGenerator":
+    if config.model_name == "TreeGenerator":
         model = generator.TreeGenerator(
             input_size=config.input_size,
             num_classes=config.num_classes,
@@ -166,7 +166,8 @@ def train(
         logging.info("Loading data from {}...".format(data_path))
         with open(data_path, 'rb') as f:
            data = pickle.load(f)
-    data = [from_networkx(d) for d in data]
+    if not isinstance(data[0], Data):
+        data = [from_networkx(d) for d in data]
 
     # prepare dataloader
     logging.info("Preparing dataloader...")

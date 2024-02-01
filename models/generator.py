@@ -318,5 +318,5 @@ class TreeGenerator(pl.LightningModule):
 
     def configure_optimizers(self):
         """ Initialize optimizer and LR scheduler """
-        return model_utils.configure_optimizers(
+        return models_utils.configure_optimizers(
             self.parameters(), self.optimizer_args, self.scheduler_args)
