@@ -334,7 +334,7 @@ class SequenceRegressorMultiFlows(pl.LightningModule):
                 f'Featurizer {featurizer_name} not supported')
 
         # create the flows
-        self.flows = []
+        self.flows = nn.ModuleList()
         for i in range(self.num_classes):
             features = (self.input_size - self.d_time) * (i + 1)
             self.flows.append(
@@ -383,6 +383,7 @@ class SequenceRegressorMultiFlows(pl.LightningModule):
         transformer_padding_mask = transformer_padding_mask.to(self.device)
         t_out = t_out.to(self.device)
         f_out = f_out.to(self.device)
+        classifier_labels = classifier_labels.to(self.device)
 
         # return a dictionary of the inputs
         return_dict = {
