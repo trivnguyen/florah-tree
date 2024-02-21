@@ -11,7 +11,7 @@ from . import training_utils
 
 def generate_tree_A(
     classifier, regressor, root_halo_feat, t_out, classifier_norm_dict=None,
-    regressor_norm_dict=None, n_max_iter=1000, device='cpu'):
+    regressor_norm_dict=None, multiflow=False, n_max_iter=1000, device='cpu'):
     """Generate a tree using a separate classifier and regressor.
 
     Parameters
@@ -29,6 +29,8 @@ def generate_tree_A(
         The normalization dictionary for the classifier.
     regressor_norm_dict : dict
         The normalization dictionary for the regressor.
+    multiflow : bool, optional
+        If the regressor is
     n_max_iter : int, optional
         The maximum number of iterations. The default is 1000.
     device : str, optional
@@ -118,33 +120,40 @@ def generate_tree_A(
             x_feat_regress = halo_feats[path]
             x_feat_regress = (x_feat_regress - regressor_x_loc) / regressor_x_scale
             t_next_regress = (t_next - regressor_x_loc[-1]) / regressor_x_scale[-1]
-            # pass through the transformer and the time projection layer
-            x_feat_regress = regressor.featurizer(x_feat_regress.unsqueeze(0)) # add batch dim
-            t_proj_regress = regressor.time_proj_layer(t_next_regress)
 
-            # list of progenitors, including the zeros starting token
-            x_progs = torch.zeros((1, num_progs + 1, num_feat), device=device)
-            t_proj_progs = t_proj_regress.unsqueeze(1).repeat(1, num_progs + 1, 1)
+            if multiflow:
+                # if the regressor has multiple flows, sample from appropriate flow
+                flow_context  = regressor(x_feat_regress.unsqueeze(0), t_next_regress)
+                flow = regressor.flows[num_progs - 1]
+                x_progs = flow.sample(1, context=flow_context)[:, 0]
+                x_progs = x_progs.view(1, num_progs, -1)
+            else:
+                x_feat_regress = regressor.featurizer(x_feat_regress.unsqueeze(0)) # add batch dim
+                t_proj_regress = regressor.time_proj_layer(t_next_regress)
 
-            for i_prog in range(num_progs):
-                n_prog_curr = i_prog + 1  # number of progenitors at current step
+                # list of progenitors, including the zeros starting token
+                x_progs = torch.zeros((1, num_progs + 1, num_feat), device=device)
+                t_proj_progs = t_proj_regress.unsqueeze(1).repeat(1, num_progs + 1, 1)
 
-                lengths = torch.tensor([n_prog_curr], dtype=torch.long)
-                f_proj = regressor.feat_proj_layer(x_progs)
+                for i_prog in range(num_progs):
+                    n_prog_curr = i_prog + 1  # number of progenitors at current step
 
-                # run the RNN to extract the context
-                x_rnn = torch.cat([f_proj, t_proj_progs], dim=-1)
-                x_rnn = regressor.rnn(x_rnn, lengths=lengths)
+                    lengths = torch.tensor([n_prog_curr], dtype=torch.long)
+                    f_proj = regressor.feat_proj_layer(x_progs)
 
-                # # sample from the flow
-                flow_context = torch.cat(
-                    [x_rnn, x_feat_regress.unsqueeze(1).repeat(1, n_prog_curr, 1)], dim=-1)
-                flow_context = flow_context[:, -1]  # only take the last time step
-                x_prog_curr = regressor.flows.sample(1, context=flow_context)
+                    # run the RNN to extract the context
+                    x_rnn = torch.cat([f_proj, t_proj_progs], dim=-1)
+                    x_rnn = regressor.rnn(x_rnn, lengths=lengths)
 
-                # append to the list of progenitors
-                x_progs[:, i_prog + 1] = x_prog_curr
-            x_progs = x_progs[:, 1:]  # remove the zeros starting token]
+                    # # sample from the flow
+                    flow_context = torch.cat(
+                        [x_rnn, x_feat_regress.unsqueeze(1).repeat(1, n_prog_curr, 1)], dim=-1)
+                    flow_context = flow_context[:, -1]  # only take the last time step
+                    x_prog_curr = regressor.flows.sample(1, context=flow_context)
+
+                    # append to the list of progenitors
+                    x_progs[:, i_prog + 1] = x_prog_curr
+                x_progs = x_progs[:, 1:]  # remove the zeros starting token]
 
             # add the progenitors to the list of halos
             x_progs = torch.cat([x_progs, t_next_regress.repeat(1, num_progs, 1)], dim=-1)
@@ -311,12 +320,12 @@ def generate_tree_B(
 
 def generate_forest(
     root_features, times_out, mode='A', generator=None, classifier=None, regressor=None,
-    norm_dict=None, classifier_norm_dict=None, regressor_norm_dict=None,
+    norm_dict=None, classifier_norm_dict=None, regressor_norm_dict=None, multiflow=False,
     n_max_iter=100, device='cpu', verbose=True):
     """ Generate multiple trees
 
     NOTE: the root_features should have the dimnesion of (batch_size, n_feat) instead
-    of (n_feat,)
+    of (n_feat,) even if the batch size is 1.
     """
     if len(root_features) != len(times_out):
         raise ValueError('root_features and times_out must have the same length')
@@ -329,7 +338,9 @@ def generate_forest(
         generator_kwargs = {
             'classifier': classifier, 'regressor': regressor,
             'classifier_norm_dict': classifier_norm_dict,
-            'regressor_norm_dict': regressor_norm_dict}
+            'regressor_norm_dict': regressor_norm_dict,
+            'multiflow': multiflow
+        }
     elif mode == 'B':
         if generator is None:
             raise ValueError('model must be provided for mode B')
