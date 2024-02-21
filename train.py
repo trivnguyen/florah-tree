@@ -7,54 +7,14 @@ import ml_collections
 import numpy as np
 import pytorch_lightning as pl
 import pytorch_lightning.loggers as pl_loggers
-import torch
-import torch_geometric
 from absl import flags, logging
 from ml_collections import config_flags
-from models import generator, models, utils, training_utils
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
-from torch_geometric.utils import from_networkx, to_networkx
 
+import datasets
+from models import generator, regressor, classifier
+from models import models, utils, training_utils
 
-def prepare_dataloader(
-    data: list, config: ml_collections.ConfigDict,
-    norm_dict: dict = None
-):
-    train_frac = config.train_frac
-    train_batch_size = config.train_batch_size
-    eval_batch_size = config.eval_batch_size
-    num_workers = config.num_workers
-
-    np.random.shuffle(data) # shuffle the data
-
-    num_total = len(data)
-    num_train = int(num_total * train_frac)
-
-    # calculate the normaliziation statistics
-    if norm_dict is None:
-        x = torch.cat([d.x for d in data[:num_train]])
-        x_loc = x.mean(dim=0)
-        x_scale = x.std(dim=0)
-        norm_dict = {
-            "x_loc": list(x_loc.numpy()),
-            "x_scale": list(x_scale.numpy()),
-        }
-    else:
-        x_loc = torch.tensor(norm_dict["x_loc"], dtype=torch.float32)
-        x_scale = torch.tensor(norm_dict["x_scale"], dtype=torch.float32)
-    for d in data:
-        d.x = (d.x - x_loc) / x_scale
-
-    # create data loader
-    train_loader = DataLoader(
-        data[:num_train], batch_size=train_batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=True)
-    val_loader = DataLoader(
-        data[num_train:], batch_size=eval_batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=True)
-
-    return train_loader, val_loader, norm_dict
+logging.set_verbosity(logging.INFO)
 
 
 def get_model(config, norm_dict=None):
@@ -90,7 +50,7 @@ def get_model(config, norm_dict=None):
             scheduler_args=config.scheduler,
             norm_dict=norm_dict,
         )
-    elif model_name == "SequenceRegressor":
+    elif config.model_name == "SequenceRegressor":
         model = regressor.SequenceRegressor(
             input_size=config.input_size,
             featurizer_args=config.featurizer,
@@ -104,7 +64,7 @@ def get_model(config, norm_dict=None):
             num_samples_per_graph=config.num_samples_per_graph,
             norm_dict=norm_dict,
         )
-    elif model_name == "SequenceRegressorMultiFlows":
+    elif config.model_name == "SequenceRegressorMultiFlows":
         model = regressor.SequenceRegressorMultiFlows(
             input_size=config.input_size,
             num_classes=config.num_classes,
@@ -149,30 +109,15 @@ def train(
                 f"Workdir {workdir} already exists. Please set overwrite=True "
                 "to overwrite the existing directory.")
 
-    # load dataset
-    if config.get("is_directory", False):
-        data = []
-        data_dir = os.path.join(config.data_root, config.data_name)
-        for i in range(config.get("max_num_files", 100)):
-            data_path = os.path.join(data_dir, "data.{}.pkl".format(i))
-            logging.info("Loading data from {}...".format(data_path))
-            if os.path.exists(data_path):
-                with open(data_path, 'rb') as f:
-                    data += pickle.load(f)
-            else:
-                break
-    else:
-        data_path = os.path.join(config.data_root, config.data_name + ".pkl")
-        logging.info("Loading data from {}...".format(data_path))
-        with open(data_path, 'rb') as f:
-           data = pickle.load(f)
-    if not isinstance(data[0], Data):
-        data = [from_networkx(d) for d in data]
-
-    # prepare dataloader
+    # load dataset and prepare dataloader
     logging.info("Preparing dataloader...")
-    train_loader, val_loader, norm_dict = prepare_dataloader(
-        data, config, norm_dict=None)
+
+    train_loader, val_loader, norm_dict = datasets.prepare_dataloader(
+        datasets.read_dataset(
+            dataset_name=config.data_name,
+            dataset_root=config.data_root,
+            max_num_files=config.get("max_num_files", 100),
+        ), config, norm_dict=None)
 
     # create model
     logging.info("Creating model...")
