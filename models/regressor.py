@@ -439,7 +439,7 @@ class SequenceRegressorMultiFlows(pl.LightningModule):
             prog_bar=True, batch_size=batch_dict['batch_size'])
         return loss_total
 
-    def training_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
 
         flow_context = self.forward(
