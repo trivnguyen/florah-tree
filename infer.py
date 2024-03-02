@@ -5,6 +5,7 @@ import pickle
 
 import numpy as np
 import torch
+import pytorch_lightning as pl
 import ml_collections
 from torch_geometric.utils import from_networkx
 from absl import flags, logging
@@ -26,6 +27,9 @@ def get_checkpoint(logdir, name, checkpoint):
 
 def infer(config: ml_collections.ConfigDict):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # set the seed
+    pl.seed_everything(config.seed)
 
     if config.data_fmt == 'pickle':
 
@@ -65,19 +69,6 @@ def infer(config: ml_collections.ConfigDict):
                 sim_aexp = torch.unique(sim_tree.x[:, -1]).flip(0)
                 root_features = root_features + [sim_root_feat] * config.num_trees_per_sim
                 times_out = times_out + [sim_aexp] * config.num_trees_per_sim
-
-    # elif config.data_fmt == 'txt':
-    #     # read the snapshot times
-    #     times_out = np.genfromtxt(
-    #         os.path.join(config.data_root, config.data_name, "snapshot_times.txt"))
-    #     data_path = os.path.join(
-    #         config.data_root, config.data_name, "data.{}.txt".format(i))
-    #     root_features = np.genfromtxt(data_path)
-
-    #     # convert to torch tensors
-    #     root_features = torch.tensor(root_features, dtype=torch.float32)
-    #     times_out = torch.tensor(times_out, dtype=torch.float32)
-    #     times_out = times_out.unsqueeze(0).repeat(len(root_features), 1)
 
     # Read in the model
     if config.mode.upper() == 'A':
