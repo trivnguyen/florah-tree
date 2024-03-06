@@ -52,7 +52,6 @@ def create_nx_graph(halo_id, halo_desc_id, halo_props=None):
             G.add_edge(parent_idx, idx) # Use indices for edges
     return G
 
-
 def plot_graph(G, fig_args=None, draw_args=None):
     if isinstance(G, Data):
         G = convert_to_nx(G)
@@ -71,7 +70,6 @@ def plot_graph(G, fig_args=None, draw_args=None):
     default_draw_args.update(draw_args)
     nx.draw(G, pos, ax=ax, **default_draw_args)
     return fig, ax
-
 
 def dfs(edge_index, start_node=0):
     """ Perform a depth-first search on the graph and return the order of nodes """
@@ -100,7 +98,6 @@ def dfs(edge_index, start_node=0):
     order = []
     dfs_visit(start_node, visited)
     return order
-
 
 def get_main_branch(mass, edge_index):
     # follow the main branch and get index
@@ -152,7 +149,6 @@ def subsample_trees(
 
     return new_halo_ids, new_halo_desc_ids, new_node_feats
 
-
 def remove_anc(halo_ids, halo_desc_ids, halo_mass, node_feats, num_max_anc=1):
     """ Remove enforce the maxmium number of ancestors. If more than num_max_anc
     halos have the same descendant, only keep the num_max_anc most massive ones.
@@ -198,7 +194,6 @@ def remove_anc(halo_ids, halo_desc_ids, halo_mass, node_feats, num_max_anc=1):
     new_halo_desc_ids = np.array(new_halo_desc_ids)
 
     return new_halo_ids, new_halo_desc_ids, new_node_feats
-
 
 def calc_num_ancestors(halo_ids, halo_desc_ids):
     """ Calculate the number of ancestors for each halo. """
