@@ -35,46 +35,7 @@ def get_model(config, norm_dict=None):
             d_feat_projection = config.d_feat_projection,
             classifier_loss_weight=config.classifier_loss_weight,
             num_samples_per_graph=config.num_samples_per_graph,
-            norm_dict=norm_dict,
-        )
-    elif config.model_name == "SequenceClassifier":
-        model = classifier.SequenceClassifier(
-            input_size=config.input_size,
-            num_classes=config.num_classes,
-            num_samples_per_graph=config.num_samples_per_graph,
-            d_time=config.d_time,
-            d_time_projection=config.d_time_projection,
-            featurizer_args=config.featurizer,
-            classifier_args=config.classifier,
-            optimizer_args=config.optimizer,
-            scheduler_args=config.scheduler,
-            norm_dict=norm_dict,
-        )
-    elif config.model_name == "SequenceRegressor":
-        model = regressor.SequenceRegressor(
-            input_size=config.input_size,
-            featurizer_args=config.featurizer,
-            rnn_args=config.rnn,
-            flows_args=config.flows,
-            optimizer_args=config.optimizer,
-            scheduler_args=config.scheduler,
-            d_time = config.d_time,
-            d_time_projection = config.d_time_projection,
-            d_feat_projection = config.d_feat_projection,
-            num_samples_per_graph=config.num_samples_per_graph,
-            norm_dict=norm_dict,
-        )
-    elif config.model_name == "SequenceRegressorMultiFlows":
-        model = regressor.SequenceRegressorMultiFlows(
-            input_size=config.input_size,
-            num_classes=config.num_classes,
-            featurizer_args=config.featurizer,
-            flows_args=config.flows,
-            optimizer_args=config.optimizer,
-            scheduler_args=config.scheduler,
-            d_time = config.d_time,
-            d_time_projection = config.d_time_projection,
-            num_samples_per_graph=config.num_samples_per_graph,
+            training_mode=config.training_mode,
             norm_dict=norm_dict,
         )
     else:

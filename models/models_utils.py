@@ -129,24 +129,3 @@ def configure_optimizers(parameters, optimizer_args, scheduler_args):
                 'frequency': 1
             }
         }
-
-
-
-def get_timestep_embedding(
-    timesteps, embedding_dim, dtype=torch.float32, device='cuda'):
-    """Build sinusoidal embeddings (from Fairseq)."""
-
-    assert len(timesteps.shape) == 1
-    timesteps = timesteps * 1000
-
-    half_dim = embedding_dim // 2
-    emb = torch.log(torch.tensor(10_000, dtype=dtype, device=device)) / (half_dim - 1)
-    emb = torch.exp(torch.arange(half_dim, dtype=dtype, device=device) * -emb)
-    emb = timesteps.type(dtype)[:, None] * emb[None, :]
-    emb = torch.concatenate([torch.sin(emb), torch.cos(emb)], axis=1)
-    if embedding_dim % 2 == 1:  # Zero pad
-        emb = F.pad(emb, (0, 1))
-        # emb = jax.lax.pad(emb, dtype(0), ((0, 0, 0), (0, 1, 0)))
-    assert emb.shape == (timesteps.shape[0], embedding_dim)
-    return emb
-
