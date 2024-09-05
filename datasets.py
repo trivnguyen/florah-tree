@@ -31,14 +31,15 @@ def read_dataset(
 
 def prepare_dataloader(
     data: list, config: ml_collections.ConfigDict,
-    norm_dict: dict = None
+    norm_dict: dict = None, seed=None
 ):
     train_frac = config.train_frac
     train_batch_size = config.train_batch_size
     eval_batch_size = config.eval_batch_size
     num_workers = config.num_workers
 
-    np.random.shuffle(data) # shuffle the data
+    rng = np.random.default_rng(seed)
+    rng.shuffle(data)
 
     num_total = len(data)
     num_train = int(num_total * train_frac)
@@ -61,9 +62,9 @@ def prepare_dataloader(
     # create data loader
     train_loader = DataLoader(
         data[:num_train], batch_size=train_batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=True)
+        num_workers=num_workers, pin_memory=torch.cuda.is_available())
     val_loader = DataLoader(
         data[num_train:], batch_size=eval_batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=True)
+        num_workers=num_workers, pin_memory=torch.cuda.is_available())
 
     return train_loader, val_loader, norm_dict
