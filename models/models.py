@@ -1,159 +1,28 @@
 
 import torch
 import torch.nn as nn
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
-
-
-class TransformerFeaturizer(nn.Module):
-    """
-    Featurizer based on the TransformerEncoder module from PyTorch.
-
-    Attributes
-    ----------
-    embedding : nn.Linear
-        The embedding layer.
-    transformer_encoder : nn.TransformerEncoder
-        The transformer encoder.
-    """
-
-    def __init__(
-        self,
-        input_size,
-        d_model,
-        nhead,
-        num_encoder_layers,
-        dim_feedforward,
-        sum_features=False,
-        batch_first=True,
-        use_embedding=True,
-        activation_fn=None,
-    ):
-        """
-        Parameters
-        ----------
-        input_size : int
-            The size of the input
-        d_model : int
-            The number of expected features in the encoder/decoder inputs.
-        nhead : int
-            The number of heads in the multiheadattention models.
-        num_encoder_layers : int
-            The number of sub-encoder-layers in the encoder.
-        sum_features : bool, optional
-            Whether to sum the features along the sequence dimension. Default: False
-        dim_feedforward : int
-            The dimension of the feedforward network model.
-        batch_first : bool, optional
-            If True, then the input and output tensors are provided as
-            (batch, seq, feature). Default: True
-        use_embedding : bool, optional
-            Whether to use an embedding layer. Default: True
-        activation_fn : callable, optional
-            The activation function to use for the embedding layer. Default: None
-        """
-        super().__init__()
-        self.input_size = input_size
-        self.d_model = d_model
-        self.nhead = nhead
-        self.num_encoder_layers = num_encoder_layers
-        self.dim_feedforward = dim_feedforward
-        self.batch_first = True
-        self.use_embedding = use_embedding
-        self.sum_features = sum_features
-        self.activation_fn = activation_fn
-
-        if use_embedding:
-            self.embedding = nn.Linear(input_size, d_model)
-        else:
-            assert input_size == d_model, (
-                "If not using embedding, input_size must be equal to d_model."
-                f"Got input_size={input_size} and d_model={d_model}"
-            )
-            self.embedding = nn.Identity()
-
-        encoder_layer = TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            batch_first=True
-        )
-        self.transformer_encoder = TransformerEncoder(
-            encoder_layer, num_encoder_layers)
-
-    def forward(self, src, src_key_padding_mask=None):
-        src = self.embedding(src)
-        if self.activation_fn is not None:
-            src = self.activation_fn(src)
-        output = self.transformer_encoder(
-            src, src_key_padding_mask=src_key_padding_mask)
-
-        # NOTE: only work when batch_first=True
-        if self.sum_features:
-            if src_key_padding_mask is None:
-                output = output.sum(dim=1)
-            else:
-                # set all the padding tokens to zero then sum over
-                output = output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
-                output = output.sum(dim=1)
-        else:
-            if src_key_padding_mask is None:
-                output = output[:, -1]
-            else:
-                lengths = src_key_padding_mask.eq(0).sum(dim=1)
-                batch_size = output.shape[0]
-                output = output[torch.arange(batch_size).to(src.device), lengths-1]
-
-        return output
-
 
 class MLP(nn.Module):
-    """
-    MLP with a variable number of hidden layers.
+    """ A simple MLP. """
 
-    Attributes
-    ----------
-    layers : nn.ModuleList
-        The layers of the MLP.
-    activation_fn : callable
-        The activation function to use.
-    """
-    def __init__(self, input_size, output_size, hidden_sizes=[512],
-                 activation_fn=nn.ReLU()):
-        """
-        Parameters
-        ----------
-        input_size : int
-            The size of the input
-        output_size : int
-            The number of classes
-        hidden_sizes : list of int, optional
-            The sizes of the hidden layers. Default: [512]
-        activation_fn : callable, optional
-            The activation function to use. Default: nn.ReLU()
-        """
+    def __init__(self, d_in, hidden_sizes, activation=nn.GELU()):
         super().__init__()
-        self.input_size = input_size
-        self.output_size = output_size
+        self.d_in = d_in
         self.hidden_sizes = hidden_sizes
-        self.activation_fn = activation_fn
+        self.activation = activation
 
-        # Create a list of all layer sizes: input, hidden, and output
-        layer_sizes = [input_size] + hidden_sizes + [output_size]
-
-        # Create layers dynamically
         self.layers = nn.ModuleList()
-        for i in range(len(layer_sizes) - 1):
-            self.layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
-
-        # Store the activation function
-        self.activation_fn = activation_fn
+        for i, h in enumerate(hidden_sizes):
+            h_in = d_in if i == 0 else hidden_sizes[i - 1]
+            h_out = h
+            self.layers.append(nn.Linear(h_in, h_out))
 
     def forward(self, x):
-        # Apply layers and activation function
-        for i, layer in enumerate(self.layers):
+        for layer in self.layers[:-1]:
             x = layer(x)
-            if i < len(self.layers) - 1:  # Apply activation function to all but last layer
-                x = self.activation_fn(x)
+            x = self.activation(x)
+        # No activation on final layer
+        x = self.layers[-1](x)
         return x
 
 class GRUModel(nn.Module):

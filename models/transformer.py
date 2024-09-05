@@ -4,8 +4,9 @@ import torch.nn as nn
 import math
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
+from models.models import MLP
 class FourierTimeEmbedding(nn.Module):
-    def __init__(self, d_model, n_frequencies=16):
+    def __init__(self, n_frequencies=16):
         super().__init__()
         # randomly initialize frequencies for the Fourier transformation
         self.B = nn.Parameter(torch.randn(n_frequencies, 1) * 2 * math.pi)
@@ -15,7 +16,6 @@ class FourierTimeEmbedding(nn.Module):
         time_proj = torch.matmul(time.unsqueeze(-1), self.B.T)
         time_emb = torch.cat([torch.sin(time_proj), torch.cos(time_proj)], dim=-1)
         return time_emb
-
 
 class Transformer(nn.Module):
     def __init__(
@@ -40,14 +40,16 @@ class Transformer(nn.Module):
         self._setup_model()
 
     def _setup_model(self):
-        self.embedding = nn.Linear(self.d_in, self.d_model)
-        self.time_embedding = FourierTimeEmbedding(self.d_model)
+        self.embedding = nn.Linear(self.d_in, self.emb_size)
+        self.time_embedding = FourierTimeEmbedding(self.emb_size)
         self.dropout = nn.Dropout(self.emb_dropout)
+        self.mlp = MLP(self.emb_size, [self.d_model, self.d_model * 4, self.d_model])
 
-        transformer_layer = TransformerEncoderLayer(
-            d_model=self.d_model, nhead=self.nhead,
-            dim_feedforward=dim_feedforward, batch_first=True)
-        self.transformer = Transformer(transformer_layer, self.num_layers)
+        self.transformer = Transformer(
+            TransformerEncoderLayer(
+                d_model=self.d_model, nhead=self.nhead,
+                dim_feedforward=dim_feedforward, batch_first=True),
+            self.num_layers)
 
     def forward(self, x, t, padding_mask=None):
 
@@ -56,6 +58,7 @@ class Transformer(nn.Module):
         t = self.time_embedding(t)
         x = x + t
         x = self.dropout(x)
+        x = self.mlp(x)
 
         # pass through the transformer
         output = self.transformer(x, src_key_padding_mask=padding_mask)
