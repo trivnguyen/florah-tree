@@ -4,8 +4,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
-from . import models, models_utils, training_utils, flows_utils
-
+from models.transformer import Transformer
 
 class TreeGenerator(pl.LightningModule):
     def __init__(
@@ -18,18 +17,18 @@ class TreeGenerator(pl.LightningModule):
         classifier_args,
         optimizer_args=None,
         scheduler_args=None,
-        d_time=1,
         d_time_projection=128,
         d_feat_projection=128,
         classifier_loss_weight=1.0,
         num_samples_per_graph=1,
+        training_mode='all',
         norm_dict=None,
     ):
         """
         Parameters
         ----------
         input_size : int
-            The size of the input
+            The size of the input, including the time dimension
         num_classes : int
             The number of classes
         featurizer_args : dict
@@ -44,8 +43,6 @@ class TreeGenerator(pl.LightningModule):
             Arguments for the optimizer. Default: None
         scheduler_args : dict, optional
             Arguments for the scheduler. Default: None
-        d_time : int, optional
-            The dimension of the time projection layer. Default: 1
         d_time_projection : int, optional
             The dimension of the time projection layer. Default: 1
         d_feat_projection : int, optional
@@ -54,6 +51,9 @@ class TreeGenerator(pl.LightningModule):
             The weight of the classifier loss. Default: 1.0
         num_samples_per_graph : int, optional
             The number of samples per graph. Default: 1
+        training_mode: str, optional
+            The training mode. Can be 'all', 'classifier', or 'regressor'.
+            Default: 'all'
         norm_dict : dict, optional
             The normalization dictionary. For bookkeeping purposes only.
             Default: None
@@ -67,72 +67,63 @@ class TreeGenerator(pl.LightningModule):
         self.classifier_args = classifier_args
         self.optimizer_args = optimizer_args or {}
         self.scheduler_args = scheduler_args or {}
-        self.d_time = d_time
         self.d_time_projection = d_time_projection
         self.d_feat_projection = d_feat_projection
         self.classifier_loss_weight = classifier_loss_weight
         self.num_samples_per_graph = num_samples_per_graph
         self.norm_dict = norm_dict
         self.batch_first = True # always True
+        self.training_mode = training_mode
+        if self.training_mode not in ['all', 'classifier', 'regressor']:
+            raise ValueError(
+                f'Training mode {self.training_mode} not supported')
         self.save_hyperparameters()
 
         self._setup_model()
 
     def _setup_model(self):
 
-        # create the featurizer
-        if self.featurizer_args.name == 'transformer':
-            activation_fn = models_utils.get_activation(
-                self.featurizer_args.activation)
-            self.featurizer = models.TransformerFeaturizer(
-                input_size=self.input_size,
-                d_model=self.featurizer_args.d_model,
-                nhead=self.featurizer_args.nhead,
-                num_encoder_layers=self.featurizer_args.num_encoder_layers,
-                dim_feedforward=self.featurizer_args.dim_feedforward,
-                batch_first=self.batch_first,
-                sum_features=self.featurizer_args.sum_features,
-                use_embedding=self.featurizer_args.use_embedding,
-                activation_fn=activation_fn,
-            )
-        else:
-            raise ValueError(
-                f'Featurizer {featurizer_name} not supported')
+        self.featurizer = Transformer(
+            input_size=self.input_size,
+            d_model=self.featurizer_args.d_model,
+            nhead=self.featurizer_args.nhead,
+            dim_feedforward=self.featurizer_args.dim_feedforward,
+            num_layers=self.featurizer_args.num_layers,
+            emb_size=self.featurizer_args.emb_size,
+            emb_dropout=self.featurizer_args.emb_dropout,
+            sum_features=self.featurizer_args.sum_features,
+        )
 
         # create the rnn
-        if self.rnn_args.name == 'gru':
-            activation_fn = models_utils.get_activation(
-                self.rnn_args.activation)
-            self.rnn = models.GRUModel(
-                input_size=self.d_feat_projection + self.d_time_projection,
-                output_size=self.rnn_args.output_size,
-                hidden_size=self.rnn_args.hidden_size,
-                num_layers=self.rnn_args.num_layers,
-                activation_fn=activation_fn,
-            )
-        else:
-            raise ValueError(
-                f'RNN {rnn_name} not supported')
+        activation_fn = models_utils.get_activation(
+            self.rnn_args.activation)
+        self.rnn = models.GRUModel(
+            input_size=self.d_feat_projection + self.d_time_projection,
+            output_size=self.rnn_args.output_size,
+            hidden_size=self.rnn_args.hidden_size,
+            num_layers=self.rnn_args.num_layers,
+            activation_fn=activation_fn
+        )
 
         # create the flows
-        self.flows = flows_utils.build_maf(
-            features=self.input_size - self.d_time,
-            hidden_features=self.flows_args.hidden_size,
-            context_features=self.rnn_args.output_size + self.featurizer_args.d_model,
-            num_layers=self.flows_args.num_layers,
-            num_blocks=self.flows_args.num_blocks,
+        self.flows = flows.NPE(
+            in_dim=self.input_size - self.d_time,
+            context_dim=self.rnn_args.output_size + self.featurizer_args.d_model,
+            hidden_dims=self.flows_args.hidden_sizes,
+            context_embedding_sizes=self.flows_args.context_embedding_sizes,
+            num_transforms=self.num_transforms,
+            dropout=self.flow_args.dropout,
         )
 
         # create the classifier
-        if self.classifier_args.name == 'mlp':
-            activation_fn = models_utils.get_activation(
-                self.classifier_args.activation)
-            self.classifier = models.MLP(
-                input_size=self.featurizer.d_model + self.d_time_projection,
-                output_size=self.num_classes,
-                hidden_sizes=self.classifier_args.hidden_sizes,
-                activation_fn=activation_fn,
-            )
+        # activation_fn = models_utils.get_activation(
+            # self.classifier_args.activation)
+        self.classifier = models.MLP(
+            input_size=self.featurizer.d_model + self.d_time_projection,
+            output_size=self.num_classes,
+            hidden_sizes=self.classifier_args.hidden_sizes,
+            activation_fn=activation_fn,
+        )
 
         # create the projection layers
         self.time_proj_layer = nn.Linear(self.d_time, self.d_time_projection)
@@ -148,9 +139,11 @@ class TreeGenerator(pl.LightningModule):
         padded_out_features = batch[2]
         out_lengths = batch[3]
 
-        # Separate the time and feature dimensions of the output
-        t_out = padded_out_features[:, 0, -self.d_time:]
-        f_out = padded_out_features[:, :, :-self.d_time]
+        # Seperate the time and feature dimensions of the input and output
+        f_in = padded_features[..., :-1]
+        t_in = padded_features[..., -1:]
+        f_out = padded_out_features[:, :, :-1]
+        t_out = padded_out_features[:, 0, -1:]  # all time steps are the same
 
         # add a starting token of all zeros to the first time step of padded_out_features
         padded_rnn_features = nn.functional.pad(f_out, (0, 0, 1, 0), value=0)
@@ -245,15 +238,22 @@ class TreeGenerator(pl.LightningModule):
         )
 
         # compute the flow loss
-        x_flow = batch_dict['padded_rnn_output'][~batch_dict['rnn_padding_mask']]
-        log_prob = self.flows.log_prob(x_flow, context=flow_context)
-        flow_loss = -log_prob.mean()
+        if self.training_mode == 'all' or self.training_mode == 'regressor':
+            x_flow = batch_dict['padded_rnn_output'][~batch_dict['rnn_padding_mask']]
+            log_prob = self.flows(flow_context).log_prob(x_flow)
+            flow_loss = -log_prob.mean()
+        else:
+            flow_loss = 0
 
         # compute the classifier loss and accuracy
-        classifier_loss = torch.nn.CrossEntropyLoss()(
-            yhat_classifier, batch_dict['classifier_labels'])
-        classifier_acc = batch_dict['classifier_labels'].eq(
-            yhat_classifier.argmax(dim=1)).float().mean()
+        if self.training_mode == 'all' or self.training_mode == 'classifier':
+            classifier_loss = torch.nn.CrossEntropyLoss()(
+                yhat_classifier, batch_dict['classifier_labels'])
+            classifier_acc = batch_dict['classifier_labels'].eq(
+                yhat_classifier.argmax(dim=1)).float().mean()
+        else:
+            classifier_loss = 0
+            classifier_acc = 0
 
         # combine the losses
         loss = flow_loss + self.classifier_loss_weight * classifier_loss
@@ -287,15 +287,22 @@ class TreeGenerator(pl.LightningModule):
         )
 
         # compute the flow loss
-        x_flow = batch_dict['padded_rnn_output'][~batch_dict['rnn_padding_mask']]
-        log_prob = self.flows.log_prob(x_flow, context=flow_context)
-        flow_loss = -log_prob.mean()
+        if training_mode == 'all' or training_mode == 'regressor':
+            x_flow = batch_dict['padded_rnn_output'][~batch_dict['rnn_padding_mask']]
+            log_prob = self.flows(flow_context).log_prob(x_flow)
+            flow_loss = -log_prob.mean()
+        else:
+            flow_loss = 0
 
         # compute the classifier loss and accuracy
-        classifier_loss = torch.nn.CrossEntropyLoss()(
-            yhat_classifier, batch_dict['classifier_labels'])
-        classifier_acc = batch_dict['classifier_labels'].eq(
-            yhat_classifier.argmax(dim=1)).float().mean()
+        if training_mode == 'all' or training_mode == 'classifier':
+            classifier_loss = torch.nn.CrossEntropyLoss()(
+                yhat_classifier, batch_dict['classifier_labels'])
+            classifier_acc = batch_dict['classifier_labels'].eq(
+                yhat_classifier.argmax(dim=1)).float().mean()
+        else:
+            classifier_loss = 0
+            classifier_acc = 0
 
         # combine the losses
         loss = flow_loss + self.classifier_loss_weight * classifier_loss
