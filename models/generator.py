@@ -83,7 +83,7 @@ class TreeGenerator(pl.LightningModule):
 
     def _setup_model(self):
 
-        self.featurizer = Transformer(
+        self.transformer = Transformer(
             input_size=self.input_size,
             d_model=self.featurizer_args.d_model,
             nhead=self.featurizer_args.nhead,
@@ -132,196 +132,203 @@ class TreeGenerator(pl.LightningModule):
 
     def _prepare_batch(self, batch):
         """ Prepare the batch for training. """
-        batch  = training_utils.prepare_batch(
+        src_feat, src_len, tgt_feat, tgt_len  = training_utils.prepare_batch(
             batch, num_samples_per_graph=self.num_samples_per_graph)
-        padded_features = batch[0]
-        lengths = batch[1]
-        padded_out_features = batch[2]
-        out_lengths = batch[3]
 
-        # Seperate the time and feature dimensions of the input and output
-        f_in = padded_features[..., :-1]
-        t_in = padded_features[..., -1:]
-        f_out = padded_out_features[:, :, :-1]
-        t_out = padded_out_features[:, 0, -1:]  # all time steps are the same
+        # Processing Transformer input and time steps
+        src, src_t = src_feat[..., :-1], src_feat[..., -1:]
+        src_padding_mask = training_utils.create_padding_mask(
+            src_len, src_feat.size(1), batch_first=True)
 
-        # add a starting token of all zeros to the first time step of padded_out_features
-        padded_rnn_features = nn.functional.pad(f_out, (0, 0, 1, 0), value=0)
+        # Processing RNN/Flows input, output and timesteps
+        tgt, tgt_t = tgt_feat[:, :, :-1], tgt_feat[:, 0, -1:]
 
-        # divide the rnn into the input and output component
+        # add a starting token of all zeros to the first time step of tgt_feat
+        # then, divide the rnn into the input and output component
         # the input will be feed into the RNN,
         # while the output will be used for the flow loss
-        padded_rnn_input = padded_rnn_features[:, :-1]
-        padded_rnn_output = padded_rnn_features[:, 1:]
+        tgt = nn.functional.pad(tgt, (0, 0, 1, 0), value=0)
+        tgt_in, tgt_out = tgt_inout[:, :-1], tgt_inout[:, 1:]
+        tgt_padding_mask = training_utils.create_padding_mask(
+            tgt_len, tgt_feat.size(1), batch_first=True)
 
-        # Assuming padded_features is your input to the transformer
-        # with shape [batch_size, seq_len, feature_size]
-        batch_size, seq_len, _ = padded_features.size()
-        out_seq_len = padded_out_features.size(1)
-
-        # Create a mask for padding (assuming padding tokens are zero)
-        # The mask should have the shape [seq_len, batch_size]
-        transformer_padding_mask = training_utils.create_padding_mask(
-            lengths, seq_len, batch_first=True)
-        rnn_padding_mask = training_utils.create_padding_mask(
-            out_lengths, out_seq_len, batch_first=True)
-
-        # get the classifier labels, which is the original length of the output
+        # Classifier target, which is the original length of the output
         # features minus 1 (start from 0)
-        classifier_labels = out_lengths - 1
+        class_target = tgt_len - 1
 
         # Move to the same device as the model
-        padded_features = padded_features.to(self.device)
-        padded_rnn_input = padded_rnn_input.to(self.device)
-        padded_rnn_output = padded_rnn_output.to(self.device)
-        transformer_padding_mask = transformer_padding_mask.to(self.device)
-        rnn_padding_mask = rnn_padding_mask.to(self.device)
-        t_out = t_out.to(self.device)
-        classifier_labels = classifier_labels.to(self.device)
+        src = src.to(self.device)
+        src_t = src_t.to(self.device)
+        tgt_in = tgt_in.to(self.device)
+        tgt_out = tgt_out.to(self.device)
+        tgt_t = tgt_t.to(self.device)
+        src_padding_mask = src_padding_mask.to(self.device)
+        tgt_padding_mask = tgt_padding_mask.to(self.device)
+        class_target = class_target.to(self.device)
 
         # return a dictionary of the inputs
-        return_dict = {
-            'padded_features': padded_features,
-            'padded_rnn_input': padded_rnn_input,
-            'padded_rnn_output': padded_rnn_output,
-            'transformer_padding_mask': transformer_padding_mask,
-            'rnn_padding_mask': rnn_padding_mask,
-            'classifier_labels': classifier_labels,
-            't_out': t_out,
-            'batch_size': batch_size,
-            'seq_len': seq_len,
-            'out_seq_len': out_seq_len,
+        return {
+            'src': src,
+            'src_t': src_t,
+            'tgt_in': tgt_in,
+            'tgt_out': tgt_out,
+            'tgt_t': tgt_t,
+            'src_padding_mask': src_padding_mask,
+            'tgt_padding_mask': tgt_padding_mask,
+            'class_target': class_target,
+            'batch_size': src.size(0),
+            'src_len': src_len,
+            'tgt_len': tgt_len,
         }
-        return return_dict
 
     def forward(
-        self, padded_features, padded_rnn_input, t_out,
-        transformer_padding_mask=None, rnn_padding_mask=None
+        self, src, src_t, tgt_in, tgt_t, src_padding_mask=None,
+        tgt_padding_mask=None, tgt_len=None
     ):
+        """ Forward pass of the model.
+        Args:
+            src: torch.Tensor, shape [batch_size, seq_len, input_size]
+                Input of the Transformer.
+            src_t: torch.Tensor, shape [batch_size, seq_len, 1]
+                Time features of the Transformer.
+            tgt_in: torch.Tensor, shape [batch_size, seq_len, input_size]
+                Input of the RNN/Flows model.
+            tgt_t: torch.Tensor, shape [batch_size, seq_len, 1]
+                Time features of the RNN/Flows model.
+            src_padding_mask: torch.Tensor, shape [batch_size, seq_len]
+                Padding mask for the Transformer.
+            tgt_padding_mask: torch.Tensor, shape [batch_size, seq_len]
+                Padding mask for the RNN/Flows model.
+            tgt_len: torch.Tensor, shape [batch_size]
+                Original lengths of the RNN/Flows features.
+        """
         # extract the features
-        x = self.featurizer(
-            padded_features, src_key_padding_mask=transformer_padding_mask)
+        x_transf = self.transformer(src, src_t, padding_mask=src_padding_mask)
 
         # project the time and feature dimensions
-        t_proj = self.time_proj_layer(t_out)
-        f_proj = self.feat_proj_layer(padded_rnn_input)
+        tgt_in_proj = self.feat_proj_layer(tgt_in)
+        tgt_t_proj = self.time_proj_layer(tgt_t)
 
         # RNN and flows
-        out_seq_len = padded_rnn_input.size(1)  # lengths after padding
-        out_lengths = rnn_padding_mask.eq(0).sum(-1).cpu() # original lengths
+        if tgt_len is None:
+            tgt_len = tgt_padding_mask.eq(0).sum(-1).cpu() # original lengths
         x_rnn = torch.cat(
-            [f_proj, t_proj.unsqueeze(1).repeat(1, out_seq_len, 1)], dim=-1)
-        x_rnn = self.rnn(x_rnn, out_lengths)
+            [tgt_in_proj, tgt_t_proj.unsqueeze(1).repeat(1, tgt_in.size(1), 1)], dim=-1)
+        x_rnn = self.rnn(x_rnn, tgt_len)
 
         # create the context and input for the flows
         flow_context = torch.cat(
-            [x_rnn, x.unsqueeze(1).repeat(1, out_seq_len, 1)], dim=-1)
-        flow_context = flow_context[~rnn_padding_mask]
+            [x_rnn, x_transf.unsqueeze(1).repeat(1, tgt_in.size(1), 1)], dim=-1)
+        flow_context = flow_context[~tgt_padding_mask]
 
         # Classifier
         # project the time and concatenate with the features
-        x_classifier = torch.cat((x, t_proj), dim=1)
-        x_classifier = self.classifier(x_classifier)
+        yhat_class = self.classifier(torch.cat((x_transf, tgt_t_proj), dim=1))
 
-        return flow_context, x_classifier
+        return flow_context, yhat_class
 
     def training_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
+        batch_size = batch_size
 
         # forward pass
-        flow_context, yhat_classifier = self.forward(
-            padded_features=batch_dict['padded_features'],
-            padded_rnn_input=batch_dict['padded_rnn_input'],
-            t_out=batch_dict['t_out'],
-            transformer_padding_mask=batch_dict['transformer_padding_mask'],
-            rnn_padding_mask=batch_dict['rnn_padding_mask'],
+        flow_context, yhat_class = self.forward(
+            src=batch_dict['src'],
+            src_t_in=batch_dict['src_t'],
+            tgt_in=batch_dict['tgt_in'],
+            tgt_t=batch_dict['tgt_t'],
+            src_padding_mask=batch_dict['src_padding_mask'],
+            tgt_padding_mask=batch_dict['tgt_padding_mask'],
+            tgt_len=batch_dict['tgt_len']
         )
 
         # compute the flow loss
         if self.training_mode == 'all' or self.training_mode == 'regressor':
-            x_flow = batch_dict['padded_rnn_output'][~batch_dict['rnn_padding_mask']]
-            log_prob = self.flows(flow_context).log_prob(x_flow)
+            flow_target = batch_dict['tgt_out'][~batch_dict['tgt_padding_mask']]
+            log_prob = self.flows(flow_context).log_prob(flow_target)
             flow_loss = -log_prob.mean()
         else:
             flow_loss = 0
 
         # compute the classifier loss and accuracy
         if self.training_mode == 'all' or self.training_mode == 'classifier':
-            classifier_loss = torch.nn.CrossEntropyLoss()(
-                yhat_classifier, batch_dict['classifier_labels'])
-            classifier_acc = batch_dict['classifier_labels'].eq(
-                yhat_classifier.argmax(dim=1)).float().mean()
+            class_loss = torch.nn.CrossEntropyLoss()(
+                yhat_class, batch_dict['class_target'])
+            class_acc = batch_dict['class_target'].eq(
+                yhat_class.argmax(dim=1)).float().mean()
         else:
-            classifier_loss = 0
-            classifier_acc = 0
+            class_loss = 0
+            class_acc = 0
 
         # combine the losses
-        loss = flow_loss + self.classifier_loss_weight * classifier_loss
+        loss = flow_loss + self.classifier_loss_weight * class_loss
 
         # log the loss and accuracy
         self.log(
             'train_flow_loss', flow_loss, on_step=True, on_epoch=True,
-            logger=True, prog_bar=True, batch_size=batch_dict['batch_size'])
+            logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
-            'train_classifier_loss', classifier_loss, on_step=True,
-            on_epoch=True, logger=True, prog_bar=True,
-            batch_size=batch_dict['batch_size'])
+            'train_class_loss', class_loss, on_step=True, on_epoch=True,
+            logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
-            'train_classifier_acc', classifier_acc, on_step=True, on_epoch=True,
-            logger=True, prog_bar=True, batch_size=batch_dict['batch_size'])
+            'train_class_acc', class_acc, on_step=True, on_epoch=True,
+            logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
-            'train_loss', loss, on_step=True, on_epoch=True, logger=True,
-            prog_bar=True, batch_size=batch_dict['batch_size'])
+            'train_loss', loss, on_step=True, on_epoch=True,
+            logger=True, prog_bar=True,  batch_size=batch_size)
         return loss
 
     def validation_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
+        batch_size = batch_dict['batch_size']
 
-        # forward pass
-        flow_context, yhat_classifier = self.forward(
-            padded_features=batch_dict['padded_features'],
-            padded_rnn_input=batch_dict['padded_rnn_input'],
-            t_out=batch_dict['t_out'],
-            transformer_padding_mask=batch_dict['transformer_padding_mask'],
-            rnn_padding_mask=batch_dict['rnn_padding_mask'],
+   # forward pass
+        flow_context, yhat_class = self.forward(
+            src=batch_dict['src'],
+            src_t_in=batch_dict['src_t'],
+            tgt_in=batch_dict['tgt_in'],
+            tgt_t=batch_dict['tgt_t'],
+            src_padding_mask=batch_dict['src_padding_mask'],
+            tgt_padding_mask=batch_dict['tgt_padding_mask'],
+            tgt_len=batch_dict['tgt_len']
         )
 
         # compute the flow loss
-        if training_mode == 'all' or training_mode == 'regressor':
-            x_flow = batch_dict['padded_rnn_output'][~batch_dict['rnn_padding_mask']]
-            log_prob = self.flows(flow_context).log_prob(x_flow)
+        if self.training_mode == 'all' or self.training_mode == 'regressor':
+            flow_target = batch_dict['tgt_out'][~batch_dict['tgt_padding_mask']]
+            log_prob = self.flows(flow_context).log_prob(flow_target)
             flow_loss = -log_prob.mean()
         else:
             flow_loss = 0
 
         # compute the classifier loss and accuracy
-        if training_mode == 'all' or training_mode == 'classifier':
-            classifier_loss = torch.nn.CrossEntropyLoss()(
-                yhat_classifier, batch_dict['classifier_labels'])
-            classifier_acc = batch_dict['classifier_labels'].eq(
-                yhat_classifier.argmax(dim=1)).float().mean()
+        if self.training_mode == 'all' or self.training_mode == 'classifier':
+            class_loss = torch.nn.CrossEntropyLoss()(
+                yhat_class, batch_dict['class_target'])
+            class_acc = batch_dict['class_target'].eq(
+                yhat_class.argmax(dim=1)).float().mean()
         else:
-            classifier_loss = 0
-            classifier_acc = 0
+            class_loss = 0
+            class_acc = 0
 
         # combine the losses
-        loss = flow_loss + self.classifier_loss_weight * classifier_loss
+        loss = flow_loss + self.classifier_loss_weight * class_loss
 
         # log the loss and accuracy
         self.log(
             'val_flow_loss', flow_loss, on_step=True, on_epoch=True,
-            logger=True, prog_bar=True, batch_size=batch_dict['batch_size'])
+            logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
-            'val_classifier_loss', classifier_loss, on_step=True,
-            on_epoch=True, logger=True, prog_bar=True,
-            batch_size=batch_dict['batch_size'])
+            'val_class_loss', class_loss, on_step=True, on_epoch=True,
+            logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
-            'val_classifier_acc', classifier_acc, on_step=True, on_epoch=True,
-            logger=True, prog_bar=True, batch_size=batch_dict['batch_size'])
+            'val_class_acc', class_acc, on_step=True, on_epoch=True,
+            logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
-            'val_loss', loss, on_step=True, on_epoch=True, logger=True,
-            prog_bar=True, batch_size=batch_dict['batch_size'])
+            'val_loss', loss, on_step=True, on_epoch=True,
+            logger=True, prog_bar=True,  batch_size=batch_size)
         return loss
+
 
     def configure_optimizers(self):
         """ Initialize optimizer and LR scheduler """
