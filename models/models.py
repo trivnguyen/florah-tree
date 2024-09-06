@@ -1,3 +1,4 @@
+from typing import List
 
 import torch
 import torch.nn as nn
@@ -5,7 +6,12 @@ import torch.nn as nn
 class MLP(nn.Module):
     """ A simple MLP. """
 
-    def __init__(self, d_in, hidden_sizes, activation=nn.GELU()):
+    def __init__(
+        self,
+        d_in: int,
+        hidden_sizes: List[int],
+        activation=nn.GELU()
+    ) -> None:
         super().__init__()
         self.d_in = d_in
         self.hidden_sizes = hidden_sizes
@@ -17,7 +23,7 @@ class MLP(nn.Module):
             h_out = h
             self.layers.append(nn.Linear(h_in, h_out))
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers[:-1]:
             x = layer(x)
             x = self.activation(x)
@@ -38,8 +44,14 @@ class GRUDecoder(nn.Module):
     activation_fn : callable
         The activation function to use.
     """
-    def __init__(self, input_size, output_size, hidden_size, num_layers=1,
-                 activation_fn=nn.ReLU()):
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        activation_fn=nn.ReLU()
+    ) -> None:
         """
         Parameters
         ----------
@@ -61,7 +73,12 @@ class GRUDecoder(nn.Module):
         self.linear = nn.Linear(hidden_size, output_size)
         self.activation_fn = activation_fn
 
-    def forward(self, x, lengths, return_hidden_states=False):
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: torch.Tensor,
+        return_hidden_states: bool = False
+    ) -> torch.Tensor:
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, lengths, batch_first=True, enforce_sorted=False)
         x, hout = self.gru_layers(x)

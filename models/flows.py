@@ -1,3 +1,4 @@
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -5,9 +6,14 @@ import zuko
 
 class NPE(nn.Module):
     def __init__(
-        self, input_size, context_size, hidden_sizes, num_transforms,
-        context_embedding_sizes=None, dropout=0.1,
-    ):
+        self,
+        input_size: int,
+        context_size: int,
+        hidden_sizes: int,
+        num_transforms: int,
+        context_embedding_sizes: Optional[int] = None,
+        dropout: int = 0.1,
+    ) -> None:
         super().__init__()
         self.input_size = input_size
         self.context_size = context_size
@@ -37,11 +43,18 @@ class NPE(nn.Module):
                 hidden_features=hidden_sizes, randperm=True
             )
 
-    def forward(self, context):
+    def forward(
+        self,
+        context: torch.Tensor
+    ) -> torch.Tensor:
         embed_context = self.lin_proj_layers(context)
         return embed_context
 
-    def log_prob(self, x, context=None):
+    def log_prob(
+        self,
+        x: torch.Tensor,
+        context: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         if context is not None:
             context = self.forward(context)
         return self.flow(context).log_prob(x)
