@@ -4,12 +4,13 @@ import torch.nn as nn
 import math
 
 from models.models import MLP
+from models import models_utils
 
 class FourierTimeEmbedding(nn.Module):
     def __init__(self, emb_size: int):
         super().__init__()
         if emb_size % 2 != 0:
-            raise ValueError("Number of frequencies must be even")
+            raise ValueError("Embedding size must be even")
 
         # randomly initialize frequencies for the Fourier transformation
         self.B = nn.Parameter(torch.randn(emb_size // 2, 1) * 2 * math.pi)
@@ -27,12 +28,15 @@ class PositionalEmbedding(nn.Module):
     """ Positional embedding, adopted from PyTorch tutorial """
     def __init__(self, emb_size: int, maxlen: int = 5000):
         super().__init__()
+        if emb_size % 2 != 0:
+            raise ValueError("Embedding size must be even")
+
         den = torch.exp(- torch.arange(0, emb_size, 2)* math.log(10000) / emb_size)
         pos = torch.arange(0, maxlen).reshape(maxlen, 1)
         pos_embedding = torch.zeros((maxlen, emb_size))
         pos_embedding[:, 0::2] = torch.sin(pos * den)
         pos_embedding[:, 1::2] = torch.cos(pos * den)
-        pos_embedding = pos_embedding.unsqueeze(-2)
+        pos_embedding = pos_embedding.unsqueeze(0)
         self.register_buffer('pos_embedding', pos_embedding)
 
     def forward(self, seq_len):
@@ -88,19 +92,16 @@ class TransformerDecoder(nn.Module):
         self,
         d_in,
         d_model,
-        d_cond,
         nhead,
         dim_feedforward,
         num_layers,
         emb_size=16,
         emb_dropout=0.1,
         max_len=3,
-        sum_features=False,
     ):
         super().__init__()
         self.d_in = d_in
         self.d_model = d_model
-        self.d_cond = d_cond
         self.nhead = nhead
         self.dim_feedforward = dim_feedforward
         self.num_layers = num_layers
@@ -121,19 +122,22 @@ class TransformerDecoder(nn.Module):
                 dim_feedforward=self.dim_feedforward, batch_first=True),
             self.num_layers)
 
-    def forward(self, tgt, cond, padding_mask=None, cond_padding_mask=None):
+    def forward(self, tgt, cond, tgt_padding_mask=None, cond_padding_mask=None):
 
         x = self.embedding(tgt) + self.postional_embedding(tgt.size(1))
         x = self.dropout(x)
         x = self.mlp(x)
 
+        # create casual mask
+        tgt_mask = models_utils.get_casual_mask(x.size(1), device=x.device)
+
         # pass through the transformer_decoder
         output = self.transformer_decoder(
             x,
             cond,
-            tgt_key_padding_mask=padding_mask,
+            tgt_mask=tgt_mask,
+            tgt_key_padding_mask=tgt_padding_mask,
             memory_key_padding_mask=cond_padding_mask,
-            tgt_is_causal=True
         )
 
         return output
