@@ -16,34 +16,6 @@ from models import models, utils, training_utils
 
 logging.set_verbosity(logging.INFO)
 
-
-def get_model(config, norm_dict=None):
-    """ Get the model from config file """
-
-    if config.model_name == "TreeGenerator":
-        model = generator.TreeGenerator(
-            input_size=config.input_size,
-            num_classes=config.num_classes,
-            featurizer_args=config.featurizer,
-            rnn_args=config.rnn,
-            flows_args=config.flows,
-            classifier_args=config.classifier,
-            optimizer_args=config.optimizer,
-            scheduler_args=config.scheduler,
-            d_time = config.d_time,
-            d_time_projection = config.d_time_projection,
-            d_feat_projection = config.d_feat_projection,
-            classifier_loss_weight=config.classifier_loss_weight,
-            num_samples_per_graph=config.num_samples_per_graph,
-            training_mode=config.training_mode,
-            norm_dict=norm_dict,
-        )
-    else:
-        raise ValueError(f"Model {config.model_name} not recognized.")
-
-    return model
-
-
 def train(
     config: ml_collections.ConfigDict, workdir: str = "./logging/"
 ):
@@ -53,9 +25,6 @@ def train(
     else:
         name = config["name"]
     logging.info("Starting training run {} at {}".format(name, workdir))
-
-    # set up random seed
-    pl.seed_everything(config.seed)
 
     workdir = os.path.join(workdir, name)
     checkpoint_path = None
@@ -72,26 +41,50 @@ def train(
 
     # load dataset and prepare dataloader
     logging.info("Preparing dataloader...")
-
     train_loader, val_loader, norm_dict = datasets.prepare_dataloader(
         datasets.read_dataset(
-            dataset_name=config.data_name,
-            dataset_root=config.data_root,
-            max_num_files=config.get("max_num_files", 100),
-        ), config, norm_dict=None)
+            dataset_root=config.data.root,
+            dataset_name=config.data.name,
+            max_num_files=config.data.get("num_files", 1),
+        ),
+        train_frac=config.data.train_frac,
+        train_batch_size=config.training.train_batch_size,
+        eval_batch_size=config.training.eval_batch_size,
+        num_workers=config.training.get("num_workers", 0),
+        seed=config.seed.data,
+        norm_dict=None,
+    )
 
-    # create model
+    # create the model
     logging.info("Creating model...")
-    model = get_model(config, norm_dict=norm_dict)
+    model_atg = AutoregTreeGen(
+        d_in=config.model.d_in,
+        num_classes=config.model.num_classes,
+        encoder_args=config.model.encoder,
+        decoder_args=config.model.decoder,
+        npe_args=config.model.npe,
+        classifier_args=config.model.classifier,
+        optimizer_args=config.optimizer,
+        scheduler_args=config.scheduler,
+        training_args=config.training,
+        norm_dict=norm_dict,
+    )
 
-    # create the trainer object
+    # Create call backs and trainer objects
     callbacks = [
         pl.callbacks.EarlyStopping(
-            monitor=config.monitor, patience=config.patience, mode=config.mode,
-            verbose=True),
+            monitor=config.training.get('monitor', 'val_loss'),
+            patience=config.training.get('patience', 10),
+            mode='min',
+            verbose=True
+        ),
         pl.callbacks.ModelCheckpoint(
-            monitor=config.monitor, save_top_k=config.save_top_k,
-            mode=config.mode, save_weights_only=False),
+            monitor=config.training.get('monitor', 'val_loss'),
+            save_top_k=config.training.get('save_top_k', 1),
+            mode='min',
+            save_weights_only=False,
+            save_last=True
+        ),
         pl.callbacks.LearningRateMonitor("epoch"),
     ]
     train_logger = pl_loggers.TensorBoardLogger(workdir, version='')
@@ -101,13 +94,17 @@ def train(
         accelerator=config.accelerator,
         callbacks=callbacks,
         logger=train_logger,
+        gradient_clip_val=config.training.get('gradient_clip_val', 0),
         enable_progress_bar=config.get("enable_progress_bar", True),
     )
 
     # train the model
     logging.info("Training model...")
+    pl.seed_everything(config.seed.training)
     trainer.fit(
-        model, train_loader, val_loader,
+        model_atg,
+        train_loaders=train_loader,
+        val_loaders=val_loader,
         ckpt_path=checkpoint_path,
     )
 

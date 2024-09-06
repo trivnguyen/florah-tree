@@ -1,3 +1,4 @@
+from typing import List, Optional, Tuple
 
 import os
 import pickle
@@ -30,14 +31,10 @@ def read_dataset(
 
 
 def prepare_dataloader(
-    data: list, config: ml_collections.ConfigDict,
-    norm_dict: dict = None, seed=None
+    data: List, train_frac: float = 0.8, train_batch_size: int = 32,
+    eval_batch_size: int = 32, num_workers: int = 0, norm_dict: dict = None,
+    seed: Optional[int] = None
 ):
-    train_frac = config.train_frac
-    train_batch_size = config.train_batch_size
-    eval_batch_size = config.eval_batch_size
-    num_workers = config.num_workers
-
     rng = np.random.default_rng(seed)
     rng.shuffle(data)
 
