@@ -78,12 +78,16 @@ def configure_optimizers(parameters, optimizer_args, scheduler_args):
     # setup the optimizer
     if optimizer_args.name == "Adam":
         return torch.optim.Adam(
-            parameters(), lr=optimizer_args.lr,
-            weight_decay=optimizer_args.weight_decay)
+            parameters,
+            lr=optimizer_args.lr,
+            weight_decay=optimizer_args.weight_decay
+        )
     elif optimizer_args.name == "AdamW":
         return torch.optim.AdamW(
-            parameters(), lr=optimizer_args.lr,
-            weight_decay=optimizer_args.weight_decay)
+            parameters,
+            lr=optimizer_args.lr,
+            weight_decay=optimizer_args.weight_decay
+        )
     else:
         raise NotImplementedError(
             "Optimizer {} not implemented".format(optimizer_args.name))
@@ -93,12 +97,17 @@ def configure_optimizers(parameters, optimizer_args, scheduler_args):
         scheduler = None
     elif scheduler_args.name == 'ReduceLROnPlateau':
         scheduler =  torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', factor=scheduler_args.factor,
-            patience=scheduler_args.patience)
+            optimizer,
+            'min',
+            factor=scheduler_args.factor,
+            patience=scheduler_args.patience
+        )
     elif scheduler_args.name == 'CosineAnnealingLR':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=scheduler_args.T_max,
-            eta_min=scheduler_args.eta_min)
+            optimizer,
+            T_max=scheduler_args.T_max,
+            eta_min=scheduler_args.eta_min
+        )
     elif scheduler_args.name == 'WarmUpCosineDecayLR':
         scheduler = WarmUpCosineDecayLR(
             optimizer,
