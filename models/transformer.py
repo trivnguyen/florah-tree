@@ -163,7 +163,7 @@ class TransformerDecoder(nn.Module):
             context = context.unsqueeze(1).expand(-1, x.size(1), -1)
             x = x + context
 
-        # create casual mask
+        # 
         tgt_mask = models_utils.get_casual_mask(x.size(1), device=x.device)
 
         # pass through the transformer_decoder

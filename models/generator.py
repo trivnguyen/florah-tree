@@ -1,80 +1,68 @@
-
+from typing import Union, Dict, Optional
 
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+from ml_collections.config_dict import ConfigDict
 
-from models.transformer import Transformer
+from models.transformer import TransformerEncoder, TransformerDecoder
+from models.models import MLP, GRUDecoder
 
-class TreeGenerator(pl.LightningModule):
+class AutoregTreeGen(pl.LightningModule):
+    """ Autoregressive tree generator model """
     def __init__(
         self,
-        input_size,
-        num_classes,
-        featurizer_args,
-        rnn_args,
-        flows_args,
-        classifier_args,
-        optimizer_args=None,
-        scheduler_args=None,
-        d_time_projection=128,
-        d_feat_projection=128,
-        classifier_loss_weight=1.0,
-        num_samples_per_graph=1,
-        training_mode='all',
-        norm_dict=None,
+        d_in: int,
+        num_classes: int,
+        encoder_args: Union[ConfigDict, Dict],
+        decoder_args: Union[ConfigDict, Dict],
+        npe_args: Union[ConfigDict, Dict],
+        classifier_args: Union[ConfigDict, Dict],
+        optimizer_args: Union[ConfigDict, Dict] = None,
+        scheduler_args: Union[ConfigDict, Dict] = None,
+        training_args: Union[ConfigDict, Dict] = None,
+        norm_dict: Optional[Dict] = None,
     ):
         """
         Parameters
         ----------
-        input_size : int
-            The size of the input, including the time dimension
+        d_in : int
+            Input dimension, excluding time dimension
         num_classes : int
             The number of classes
-        featurizer_args : dict
-            Arguments for the featurizer
-        rnn_args : dict
-            Arguments for the RNN
-        flows_args : dict
-            Arguments for the normalizing flow
+        encoder_args : dict
+            Arguments for the encoder
+        decoder_args : dict
+            Arguments for the decoder
+        npe_args : dict
+            Arguments for the NPE
         classifier_args : dict
             Arguments for the classifier
         optimizer_args : dict, optional
             Arguments for the optimizer. Default: None
         scheduler_args : dict, optional
             Arguments for the scheduler. Default: None
-        d_time_projection : int, optional
-            The dimension of the time projection layer. Default: 1
-        d_feat_projection : int, optional
-            The dimension of the feature projection layer. Default: 1
-        classifier_loss_weight : float, optional
-            The weight of the classifier loss. Default: 1.0
-        num_samples_per_graph : int, optional
-            The number of samples per graph. Default: 1
-        training_mode: str, optional
-            The training mode. Can be 'all', 'classifier', or 'regressor'.
-            Default: 'all'
+        training_args : dict, optional
+            Arguments for the training process. Default: None
         norm_dict : dict, optional
             The normalization dictionary. For bookkeeping purposes only.
             Default: None
         """
         super().__init__()
-        self.input_size = input_size
+        self.d_in = d_in
         self.num_classes = num_classes
-        self.featurizer_args = featurizer_args
-        self.rnn_args = rnn_args
-        self.flows_args = flows_args
+        self.encoder_args = encoder_args
+        self.decoder_args = decoder_args
+        self.npe_args = npe_args
         self.classifier_args = classifier_args
-        self.optimizer_args = optimizer_args or {}
-        self.scheduler_args = scheduler_args or {}
-        self.d_time_projection = d_time_projection
-        self.d_feat_projection = d_feat_projection
-        self.classifier_loss_weight = classifier_loss_weight
-        self.num_samples_per_graph = num_samples_per_graph
+        self.optimizer_args = optimizer_args
+        self.scheduler_args = scheduler_args
+        self.training_args = training_args
         self.norm_dict = norm_dict
-        self.batch_first = True # always True
-        self.training_mode = training_mode
-        if self.training_mode not in ['all', 'classifier', 'regressor']:
+        self.num_samples_per_graph = self.training_args.get(
+            'num_samples_per_graph', 1)
+        self.training_mode = training_args.get('training_mode', 'all')
+        if self.training_mode not in ('all', 'classifier', 'regressor'):
             raise ValueError(
                 f'Training mode {self.training_mode} not supported')
         self.save_hyperparameters()
@@ -83,52 +71,63 @@ class TreeGenerator(pl.LightningModule):
 
     def _setup_model(self):
 
-        self.transformer = Transformer(
-            input_size=self.input_size,
-            d_model=self.featurizer_args.d_model,
-            nhead=self.featurizer_args.nhead,
-            dim_feedforward=self.featurizer_args.dim_feedforward,
-            num_layers=self.featurizer_args.num_layers,
-            emb_size=self.featurizer_args.emb_size,
-            emb_dropout=self.featurizer_args.emb_dropout,
-            sum_features=self.featurizer_args.sum_features,
-        )
+        # create the transformer
+        if self.encoder_args.name == 'transformer':
+            self.encoder = TransformerEncoder(
+                d_in=self.d_in,
+                d_model=self.encoder_args.d_model,
+                nhead=self.encoder_args.nhead,
+                dim_feedforward=self.encoder_args.dim_feedforward,
+                num_layers=self.encoder_args.num_layers,
+                emb_size=self.encoder_args.emb_size,
+                emb_dropout=self.encoder_args.emb_dropout,
+            )
+        else:
+            raise NotImplementedError(
+                f'Encoder {self.encoder_args.name} not implemented')
 
-        # create the rnn
-        activation_fn = models_utils.get_activation(
-            self.rnn_args.activation)
-        self.rnn = models.GRUModel(
-            input_size=self.d_feat_projection + self.d_time_projection,
-            output_size=self.rnn_args.output_size,
-            hidden_size=self.rnn_args.hidden_size,
-            num_layers=self.rnn_args.num_layers,
-            activation_fn=activation_fn
-        )
+        # create the RNN and flows
+        if self.decoder_args.name == 'transformer':
+            self.decoder = TransformerDecoder(
+                d_in=self.d_in,
+                d_model=self.decoder_args.d_model,
+                d_context=self.decoder_args.d_context,
+                nhead=self.decoder_args.nhead,
+                dim_feedforward=self.decoder_args.dim_feedforward,
+                num_layers=self.decoder_args.num_layers,
+                emb_size=self.decoder_args.emb_size,
+                emb_dropout=self.decoder_args.emb_dropout,
+                max_len=self.decoder_args.max_len,
+            )
+        elif self.decoder_args.name == 'gru':
+            self.decoder = GRUDecoder(
+                input_size=self.d_feat_projection + self.d_time_projection,
+                output_size=self.decoder_args.output_size,
+                hidden_size=self.decoder_args.hidden_size,
+                num_layers=self.decoder_args.num_layers,
+                activation_fn=nn.GELU(),
+            )
+        else:
+            raise NotImplementedError(
+                f'Decoder {self.decoder_args.name} not implemented')
 
-        # create the flows
-        self.flows = flows.NPE(
-            in_dim=self.input_size - self.d_time,
-            context_dim=self.rnn_args.output_size + self.featurizer_args.d_model,
-            hidden_dims=self.flows_args.hidden_sizes,
-            context_embedding_sizes=self.flows_args.context_embedding_sizes,
-            num_transforms=self.num_transforms,
-            dropout=self.flow_args.dropout,
+        # create the NPE
+        self.npe = flows.NPE(
+            input_size=self.d_in,
+            context_size=self.decoder_args.d_model,
+            hidden_sizes=self.npe_args.hidden_sizes,
+            context_embedding_sizes=self.npe_args.context_embedding_sizes,
+            num_transforms=self.npe_args.num_transforms,
+            dropout=self.npe_args.dropout,
         )
 
         # create the classifier
-        # activation_fn = models_utils.get_activation(
-            # self.classifier_args.activation)
-        self.classifier = models.MLP(
-            input_size=self.featurizer.d_model + self.d_time_projection,
-            output_size=self.num_classes,
-            hidden_sizes=self.classifier_args.hidden_sizes,
-            activation_fn=activation_fn,
+        self.classifier_context_embed = nn.Linear(
+            self.classifier_args.d_context, self.encoder.d_model)
+        self.classifier = MLP(
+            d_in=self.encoder.d_model,
+            hidden_sizes=self.classifier_args.hidden_sizes + [self.num_classes,],
         )
-
-        # create the projection layers
-        self.time_proj_layer = nn.Linear(self.d_time, self.d_time_projection)
-        self.feat_proj_layer = nn.Linear(
-            self.input_size - self.d_time, self.d_feat_projection)
 
     def _prepare_batch(self, batch):
         """ Prepare the batch for training. """
@@ -148,7 +147,7 @@ class TreeGenerator(pl.LightningModule):
         # the input will be feed into the RNN,
         # while the output will be used for the flow loss
         tgt = nn.functional.pad(tgt, (0, 0, 1, 0), value=0)
-        tgt_in, tgt_out = tgt_inout[:, :-1], tgt_inout[:, 1:]
+        tgt_in, tgt_out = tgt[:, :-1], tgt[:, 1:]
         tgt_padding_mask = training_utils.create_padding_mask(
             tgt_len, tgt_feat.size(1), batch_first=True)
 
@@ -187,85 +186,89 @@ class TreeGenerator(pl.LightningModule):
     ):
         """ Forward pass of the model.
         Args:
-            src: torch.Tensor, shape [batch_size, seq_len, input_size]
+            src: torch.Tensor, shape [batch_size, seq_len, d_in]
                 Input of the Transformer.
             src_t: torch.Tensor, shape [batch_size, seq_len, 1]
                 Time features of the Transformer.
-            tgt_in: torch.Tensor, shape [batch_size, seq_len, input_size]
+            tgt_in: torch.Tensor, shape [batch_size, seq_len, d_in]
                 Input of the RNN/Flows model.
-            tgt_t: torch.Tensor, shape [batch_size, seq_len, 1]
+            tgt_t: torch.Tensor, shape [batch_size, 1]
                 Time features of the RNN/Flows model.
             src_padding_mask: torch.Tensor, shape [batch_size, seq_len]
                 Padding mask for the Transformer.
             tgt_padding_mask: torch.Tensor, shape [batch_size, seq_len]
                 Padding mask for the RNN/Flows model.
-            tgt_len: torch.Tensor, shape [batch_size]
-                Original lengths of the RNN/Flows features.
         """
-        # extract the features
-        x_transf = self.transformer(src, src_t, padding_mask=src_padding_mask)
+        # 1. pass the input sequence through the encoder
+        x_enc = self.encoder(
+            src,
+            src_t,
+            src_padding_mask=src_padding_mask
+        )
 
-        # project the time and feature dimensions
-        tgt_in_proj = self.feat_proj_layer(tgt_in)
-        tgt_t_proj = self.time_proj_layer(tgt_t)
+        # 2. pass the encoded features through the decoder
+        # using the output time steps as the context
+        x_dec = self.decoder(
+            tgt_in,
+            memory=x_enc,
+            context=tgt_t,
+            tgt_padding_mask=tgt_padding_mask,
+            memory_padding_mask=src_padding_mask
+        )
 
-        # RNN and flows
-        if tgt_len is None:
-            tgt_len = tgt_padding_mask.eq(0).sum(-1).cpu() # original lengths
-        x_rnn = torch.cat(
-            [tgt_in_proj, tgt_t_proj.unsqueeze(1).repeat(1, tgt_in.size(1), 1)], dim=-1)
-        x_rnn = self.rnn(x_rnn, tgt_len)
+        # 3. create the flows context
+        x_enc_reduced = models_utils.summarize_features(
+            x_enc, reduction='mean', padding_mask=src_padding_mask)
+        context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
+        context_flows = context_flows[~tgt_padding_mask]
 
-        # create the context and input for the flows
-        flow_context = torch.cat(
-            [x_rnn, x_transf.unsqueeze(1).repeat(1, tgt_in.size(1), 1)], dim=-1)
-        flow_context = flow_context[~tgt_padding_mask]
+        # 4. pass the encoded features through the classifier
+        # add the output time steps to the encoded features
+        x_class = x_enc_reduced + self.classifier_context_embed(tgt_t)
+        x_class = self.classifier(x_class)
 
-        # Classifier
-        # project the time and concatenate with the features
-        yhat_class = self.classifier(torch.cat((x_transf, tgt_t_proj), dim=1))
-
-        return flow_context, yhat_class
+        return context_flows, x_class
 
     def training_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
         batch_size = batch_size
 
         # forward pass
-        flow_context, yhat_class = self.forward(
+        context_flows, yhat_class = self.forward(
             src=batch_dict['src'],
             src_t_in=batch_dict['src_t'],
             tgt_in=batch_dict['tgt_in'],
             tgt_t=batch_dict['tgt_t'],
             src_padding_mask=batch_dict['src_padding_mask'],
             tgt_padding_mask=batch_dict['tgt_padding_mask'],
-            tgt_len=batch_dict['tgt_len']
         )
 
         # compute the flow loss
         if self.training_mode == 'all' or self.training_mode == 'regressor':
-            flow_target = batch_dict['tgt_out'][~batch_dict['tgt_padding_mask']]
-            log_prob = self.flows(flow_context).log_prob(flow_target)
-            flow_loss = -log_prob.mean()
+            target_flows = batch_dict['tgt_out'][~batch_dict['tgt_padding_mask']]
+            flows_loss = -self.npe.log_prob(
+                target_flows,
+                context=context_flows
+            ).mean()
         else:
-            flow_loss = 0
+            flows_loss = 0
 
         # compute the classifier loss and accuracy
         if self.training_mode == 'all' or self.training_mode == 'classifier':
             class_loss = torch.nn.CrossEntropyLoss()(
-                yhat_class, batch_dict['class_target'])
+                x_class, batch_dict['class_target'])
             class_acc = batch_dict['class_target'].eq(
-                yhat_class.argmax(dim=1)).float().mean()
+                x_class.argmax(dim=1)).float().mean()
         else:
             class_loss = 0
             class_acc = 0
 
         # combine the losses
-        loss = flow_loss + self.classifier_loss_weight * class_loss
+        loss = flows_loss + self.class_loss_weight * class_loss
 
         # log the loss and accuracy
         self.log(
-            'train_flow_loss', flow_loss, on_step=True, on_epoch=True,
+            'train_flows_loss', flows_loss, on_step=True, on_epoch=True,
             logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
             'train_class_loss', class_loss, on_step=True, on_epoch=True,
@@ -282,53 +285,53 @@ class TreeGenerator(pl.LightningModule):
         batch_dict = self._prepare_batch(batch)
         batch_size = batch_dict['batch_size']
 
-   # forward pass
-        flow_context, yhat_class = self.forward(
+        # forward pass
+        context_flows, x_class = self.forward(
             src=batch_dict['src'],
             src_t_in=batch_dict['src_t'],
             tgt_in=batch_dict['tgt_in'],
             tgt_t=batch_dict['tgt_t'],
             src_padding_mask=batch_dict['src_padding_mask'],
             tgt_padding_mask=batch_dict['tgt_padding_mask'],
-            tgt_len=batch_dict['tgt_len']
         )
 
         # compute the flow loss
         if self.training_mode == 'all' or self.training_mode == 'regressor':
-            flow_target = batch_dict['tgt_out'][~batch_dict['tgt_padding_mask']]
-            log_prob = self.flows(flow_context).log_prob(flow_target)
-            flow_loss = -log_prob.mean()
+            target_flows = batch_dict['tgt_out'][~batch_dict['tgt_padding_mask']]
+            flows_loss = -self.npe.log_prob(
+                target_flows,
+                context=context_flows
+            ).mean()
         else:
-            flow_loss = 0
+            flows_loss = 0
 
         # compute the classifier loss and accuracy
         if self.training_mode == 'all' or self.training_mode == 'classifier':
             class_loss = torch.nn.CrossEntropyLoss()(
-                yhat_class, batch_dict['class_target'])
+                x_class, batch_dict['class_target'])
             class_acc = batch_dict['class_target'].eq(
-                yhat_class.argmax(dim=1)).float().mean()
+                x_class.argmax(dim=1)).float().mean()
         else:
             class_loss = 0
             class_acc = 0
 
         # combine the losses
-        loss = flow_loss + self.classifier_loss_weight * class_loss
+        loss = flows_loss + self.class_loss_weight * class_loss
 
         # log the loss and accuracy
         self.log(
-            'val_flow_loss', flow_loss, on_step=True, on_epoch=True,
+            'val_flows_loss', flows_loss, on_step=True, on_epoch=True,
             logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
             'val_class_loss', class_loss, on_step=True, on_epoch=True,
             logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
             'val_class_acc', class_acc, on_step=True, on_epoch=True,
-            logger=True, prog_bar=True, batch_size=batch_size)
+            logger=True, prog_bar=True, batch_size=bats)
         self.log(
-            'val_loss', loss, on_step=True, on_epoch=True,
+            'val_ loss', on_step=True, on_epoch=True,
             logger=True, prog_bar=True,  batch_size=batch_size)
         return loss
-
 
     def configure_optimizers(self):
         """ Initialize optimizer and LR scheduler """

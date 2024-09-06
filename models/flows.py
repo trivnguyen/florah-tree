@@ -40,3 +40,8 @@ class NPE(nn.Module):
     def forward(self, context):
         embed_context = self.lin_proj_layers(context)
         return embed_context
+
+    def log_prob(self, x, context=None):
+        if context is not None:
+            context = self.forward(context)
+        return self.flow(context).log_prob(x)

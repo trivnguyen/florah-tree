@@ -129,3 +129,33 @@ def configure_optimizers(parameters, optimizer_args, scheduler_args):
                 'frequency': 1
             }
         }
+
+def summarize_features(x, reduction='sum', padding_mask=None):
+    if reduction == 'sum':
+        if padding_mask is None:
+            x = x.sum(dim=1)
+        else:
+            # set all the padding tokens to zero then sum over
+            x = x.masked_fill(padding_mask.unsqueeze(-1), 0)
+            x = x.sum(dim=1)
+    elif reduction == 'mean':
+        if padding_mask is None:
+            x = x.sum(dim=1) / x.size(1)
+        else:
+            # set all the padding tokens to zero then sum over
+            x = x.masked_fill(padding_mask.unsqueeze(-1), 0)
+            x = x.sum(dim=1) / padding_mask.eq(0).sum(dim=1).unsqueeze(-1)
+    elif reduction == 'last':
+        if padding_mask is None:
+            x = x[:, -1]
+        else:
+            lengths = padding_mask.eq(0).sum(dim=1)
+            x = x[torch.arange(x.size(0), device=x.device), lengths-1]
+    else:
+        raise ValueError(f'Unknown reduction: {reduction}')
+
+    return x
+
+def get_casual_mask(size, device):
+    mask = torch.triu(torch.ones(size, size, device=device), diagonal=1)
+    return mask.bool()

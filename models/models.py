@@ -25,7 +25,7 @@ class MLP(nn.Module):
         x = self.layers[-1](x)
         return x
 
-class GRUModel(nn.Module):
+class GRUDecoder(nn.Module):
     """
     GRU model with a variable number of hidden layers.
 
