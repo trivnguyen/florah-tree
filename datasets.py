@@ -31,10 +31,32 @@ def read_dataset(
 
 
 def prepare_dataloader(
-    data: List, train_frac: float = 0.8, train_batch_size: int = 32,
-    eval_batch_size: int = 32, num_workers: int = 0, norm_dict: dict = None,
+    data: List,
+    train_frac: float = 0.8,
+    train_batch_size: int = 32,
+    eval_batch_size: int = 32,
+    num_workers: int = 0,
+    norm_dict: dict = None,
+    reverse_time: bool = False,
     seed: Optional[int] = None
 ):
+    """
+    Prepare the dataloader for training and evaluation.
+    Args:
+        data: list of PyTorch Geometric Data objects.
+        train_frac: fraction of the data to use for training.
+        train_batch_size: batch size for training.
+        eval_batch_size: batch size for evaluation.
+        num_workers: number of workers for data loading.
+        norm_dict: dictionary containing normalization statistics.
+        reverse_time: whether to reverse the time axis
+        seed: random seed for shuffling the data.
+    Returns:
+        train_loader: PyTorch DataLoader for training.
+        val_loader: PyTorch DataLoader for evaluation.
+        norm_dict: dictionary containing normalization statistics.
+    """
+
     rng = np.random.default_rng(seed)
     rng.shuffle(data)
 
@@ -51,6 +73,9 @@ def prepare_dataloader(
         x_scale = x.std(dim=0)
         t_loc = t.min()
         t_scale = t.max() - t_loc
+        if reverse_time:
+            t_loc = t_scale + t_loc
+            t_scale = -t_scale
 
         norm_dict = {
             "x_loc": list(x_loc.numpy()),
