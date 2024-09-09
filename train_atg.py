@@ -62,6 +62,7 @@ def train(
         num_workers=config.training.get("num_workers", 0),
         seed=config.seed.data,
         norm_dict=None,
+        reverse_time=config.data.get("reverse_time", False),
     )
 
     # create the model
