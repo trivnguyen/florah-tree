@@ -1,18 +1,19 @@
 
 import os
 import pickle
+import shutil
 import sys
 
+import datasets
 import ml_collections
 import numpy as np
 import pytorch_lightning as pl
 import pytorch_lightning.loggers as pl_loggers
+import yaml
 from absl import flags, logging
 from ml_collections import config_flags
-
-import datasets
-from models import generator, regressor, classifier
-from models import models, utils, training_utils
+from models import utils
+from models.atg import AutoregTreeGen
 
 logging.set_verbosity(logging.INFO)
 
@@ -38,6 +39,12 @@ def train(
             raise ValueError(
                 f"Workdir {workdir} already exists. Please set overwrite=True "
                 "to overwrite the existing directory.")
+
+    # Save the configuration to a YAML file
+    config_dict = config.to_dict()
+    config_path = os.path.join(workdir, 'config.yaml')
+    with open(config_path, 'w') as f:
+        yaml.dump(config_dict, f, default_flow_style=False)
 
     # load dataset and prepare dataloader
     logging.info("Preparing dataloader...")
@@ -74,28 +81,32 @@ def train(
     callbacks = [
         pl.callbacks.EarlyStopping(
             monitor=config.training.get('monitor', 'val_loss'),
-            patience=config.training.get('patience', 10),
+            patience=config.training.get('patience', 1000),
             mode='min',
             verbose=True
         ),
         pl.callbacks.ModelCheckpoint(
+            filename="{epoch}-{step}-{val_loss:.4f}",
             monitor=config.training.get('monitor', 'val_loss'),
             save_top_k=config.training.get('save_top_k', 1),
             mode='min',
             save_weights_only=False,
             save_last=True
         ),
-        pl.callbacks.LearningRateMonitor("epoch"),
+        pl.callbacks.LearningRateMonitor("step"),
     ]
     train_logger = pl_loggers.TensorBoardLogger(workdir, version='')
     trainer = pl.Trainer(
         default_root_dir=workdir,
-        max_epochs=config.num_epochs,
+        max_steps=config.training.max_steps,
         accelerator=config.accelerator,
         callbacks=callbacks,
         logger=train_logger,
         gradient_clip_val=config.training.get('gradient_clip_val', 0),
         enable_progress_bar=config.get("enable_progress_bar", True),
+        # log_every_n_steps=config.training.log_every_n_steps,
+        # val_check_interval=config.training.val_check_interval,
+        # check_val_every_n_epoch=None,
     )
 
     # train the model
@@ -103,8 +114,8 @@ def train(
     pl.seed_everything(config.seed.training)
     trainer.fit(
         model_atg,
-        train_loaders=train_loader,
-        val_loaders=val_loader,
+        train_dataloaders=train_loader,
+        val_dataloaders=val_loader,
         ckpt_path=checkpoint_path,
     )
 

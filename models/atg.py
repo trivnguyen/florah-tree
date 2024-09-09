@@ -5,7 +5,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from ml_collections.config_dict import ConfigDict
 
-from models import flows, models_utils
+from models import flows, models_utils, training_utils
 from models.transformer import TransformerEncoder, TransformerDecoder
 from models.models import MLP, GRUDecoder
 
@@ -60,10 +60,10 @@ class AutoregTreeGen(pl.LightningModule):
         self.scheduler_args = scheduler_args
         self.training_args = training_args
         self.norm_dict = norm_dict
-        self.num_samples_per_graph = self.training_args.get(
-            'num_samples_per_graph', 1)
+        self.num_samples_per_graph = self.training_args.get('num_samples_per_graph', 1)
         self.training_mode = training_args.get('training_mode', 'all')
-        if self.training_mode not in ('all', 'classifier', 'regressor'):
+        self.class_loss_weight = training_args.get('class_loss_weight', 1.0)
+        if self.training_mode not in ('all', 'classifier', 'npe'):
             raise ValueError(
                 f'Training mode {self.training_mode} not supported')
         self.save_hyperparameters()
@@ -232,12 +232,12 @@ class AutoregTreeGen(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
-        batch_size = batch_size
+        batch_size = batch_dict['batch_size']
 
         # forward pass
         context_flows, yhat_class = self.forward(
             src=batch_dict['src'],
-            src_t_in=batch_dict['src_t'],
+            src_t=batch_dict['src_t'],
             tgt_in=batch_dict['tgt_in'],
             tgt_t=batch_dict['tgt_t'],
             src_padding_mask=batch_dict['src_padding_mask'],
@@ -245,7 +245,7 @@ class AutoregTreeGen(pl.LightningModule):
         )
 
         # compute the flow loss
-        if self.training_mode == 'all' or self.training_mode == 'regressor':
+        if self.training_mode == 'all' or self.training_mode == 'npe':
             target_flows = batch_dict['tgt_out'][~batch_dict['tgt_padding_mask']]
             flows_loss = -self.npe.log_prob(
                 target_flows,
@@ -289,7 +289,7 @@ class AutoregTreeGen(pl.LightningModule):
         # forward pass
         context_flows, x_class = self.forward(
             src=batch_dict['src'],
-            src_t_in=batch_dict['src_t'],
+            src_t=batch_dict['src_t'],
             tgt_in=batch_dict['tgt_in'],
             tgt_t=batch_dict['tgt_t'],
             src_padding_mask=batch_dict['src_padding_mask'],
@@ -297,7 +297,7 @@ class AutoregTreeGen(pl.LightningModule):
         )
 
         # compute the flow loss
-        if self.training_mode == 'all' or self.training_mode == 'regressor':
+        if self.training_mode == 'all' or self.training_mode == 'npe':
             target_flows = batch_dict['tgt_out'][~batch_dict['tgt_padding_mask']]
             flows_loss = -self.npe.log_prob(
                 target_flows,
@@ -328,9 +328,9 @@ class AutoregTreeGen(pl.LightningModule):
             logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
             'val_class_acc', class_acc, on_step=True, on_epoch=True,
-            logger=True, prog_bar=True, batch_size=bats)
+            logger=True, prog_bar=True, batch_size=batch_size)
         self.log(
-            'val_ loss', on_step=True, on_epoch=True,
+            'val_loss', loss, on_step=True, on_epoch=True,
             logger=True, prog_bar=True,  batch_size=batch_size)
         return loss
 
