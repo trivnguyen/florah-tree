@@ -235,7 +235,7 @@ class AutoregTreeGen(pl.LightningModule):
         batch_size = batch_dict['batch_size']
 
         # forward pass
-        context_flows, yhat_class = self.forward(
+        context_flows, x_class = self.forward(
             src=batch_dict['src'],
             src_t=batch_dict['src_t'],
             tgt_in=batch_dict['tgt_in'],
