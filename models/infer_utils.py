@@ -32,6 +32,7 @@ def generate_tree(
     Returns:
         tree: the generated tree
     """
+    model.eval()
 
     device = device or model.device
     if not isinstance(x_root, torch.Tensor):
