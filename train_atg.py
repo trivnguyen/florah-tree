@@ -40,6 +40,8 @@ def train(
                 f"Workdir {workdir} already exists. Please set overwrite=True "
                 "to overwrite the existing directory.")
 
+    os.makedirs(workdir, exist_ok=True)
+
     # Save the configuration to a YAML file
     config_dict = config.to_dict()
     config_path = os.path.join(workdir, 'config.yaml')
