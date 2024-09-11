@@ -18,13 +18,16 @@ def read_dataset(
     data_dir = os.path.join(dataset_root, dataset_name)
     for i in range(max_num_files):
         data_path = os.path.join(data_dir, "data.{}.pkl".format(i))
-        if verbose:
-            print("Loading data from {}...".format(data_path))
         if os.path.exists(data_path):
             with open(data_path, 'rb') as f:
                 data += pickle.load(f)
+            if verbose:
+                print("Loading data from {}...".format(data_path))
         else:
+            if verbose:
+                print("Data file {} not found. Stopping".format(data_path))
             break
+
     if not isinstance(data[0], Data):
         data = [from_networkx(d) for d in data]
     return data
