@@ -102,11 +102,12 @@ class AutoregTreeGen(pl.LightningModule):
             )
         elif self.decoder_args.name == 'gru':
             self.decoder = GRUDecoder(
-                input_size=self.d_feat_projection + self.d_time_projection,
-                output_size=self.decoder_args.output_size,
-                hidden_size=self.decoder_args.hidden_size,
+                d_in=self.d_in,
+                d_model=self.decoder_args.d_model,
+                d_out=self.decoder_args.d_out,
+                dim_feedforward=self.decoder_args.dim_feedforward,
                 num_layers=self.decoder_args.num_layers,
-                activation_fn=nn.GELU(),
+                activation_fn=nn.ReLU()
             )
         else:
             raise NotImplementedError(
@@ -206,20 +207,27 @@ class AutoregTreeGen(pl.LightningModule):
             src_t,
             src_padding_mask=src_padding_mask
         )
+        x_enc_reduced = models_utils.summarize_features(
+            x_enc, reduction='last', padding_mask=src_padding_mask)
 
         # 2. pass the encoded features through the decoder
         # using the output time steps as the context
-        x_dec = self.decoder(
-            tgt_in,
-            memory=x_enc,
-            context=tgt_t,
-            tgt_padding_mask=tgt_padding_mask,
-            memory_padding_mask=src_padding_mask
-        )
+        if self.decoder_args.name == 'transformer':
+            x_dec = self.decoder(
+                tgt_in,
+                memory=x_enc,
+                context=tgt_t,
+                tgt_padding_mask=tgt_padding_mask,
+                memory_padding_mask=src_padding_mask
+            )
+        elif self.decoder_args.name == 'gru':
+            x_dec = self.decoder(
+                x=tgt_in,
+                t=tgt_t.unsqueeze(1).expand(-1, tgt_in.size(1), -1),
+                lengths=tgt_padding_mask.eq(0).sum(-1).cpu(),
+            )
 
         # 3. create the flows context
-        x_enc_reduced = models_utils.summarize_features(
-            x_enc, reduction='mean', padding_mask=src_padding_mask)
         context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
         context_flows = context_flows[~tgt_padding_mask]
 

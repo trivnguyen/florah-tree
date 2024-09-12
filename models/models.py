@@ -46,39 +46,47 @@ class GRUDecoder(nn.Module):
     """
     def __init__(
         self,
-        input_size: int,
-        output_size: int,
-        hidden_size: int,
+        d_in: int,
+        d_model: int,
+        d_out: int,
+        dim_feedforward: int,
         num_layers: int = 1,
         activation_fn=nn.ReLU()
     ) -> None:
         """
         Parameters
         ----------
-        input_size : int
+        d_in : int
             The size of the input
-        output_size : int
+        d_out : int
             The number of classes
-        hidden_size : int
+        dim_feedforward : int
             The size of the hidden layers
         num_layers : int, optional
             The number of hidden layers. Default: 1
+        d_model: int : int, optional
+            The size of the embedding. Default: 16
         activation_fn : callable, optional
             The activation function to use. Default: nn.ReLU()
         """
         super().__init__()
 
+        self.linear_x_proj = nn.Linear(d_in, d_model)
+        self.linear_t_proj = nn.Linear(1, d_model)
         self.gru_layers = nn.GRU(
-            input_size, hidden_size, num_layers=num_layers, batch_first=True)
-        self.linear = nn.Linear(hidden_size, output_size)
+            d_model, dim_feedforward, num_layers=num_layers, batch_first=True)
+        self.linear = nn.Linear(dim_feedforward, d_out)
         self.activation_fn = activation_fn
 
     def forward(
         self,
         x: torch.Tensor,
+        t: torch.Tensor,
         lengths: torch.Tensor,
         return_hidden_states: bool = False
     ) -> torch.Tensor:
+        # project x and t
+        x = self.linear_x_proj(x) + self.linear_t_proj(t)
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, lengths, batch_first=True, enforce_sorted=False)
         x, hout = self.gru_layers(x)
