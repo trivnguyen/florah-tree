@@ -55,6 +55,7 @@ class TransformerEncoder(nn.Module):
         num_layers: int = 1,
         emb_size: int = 16,
         emb_dropout: float = 0.1,
+        emb_type: str = 'fourier',
     ) -> None:
         super().__init__()
         self.d_in = d_in
@@ -64,14 +65,22 @@ class TransformerEncoder(nn.Module):
         self.num_layers = num_layers
         self.emb_size = emb_size
         self.emb_dropout = emb_dropout
+        self.emb_type = emb_type
         self._setup_model()
 
     def _setup_model(self) -> None:
         # embedding layers
         self.embedding = nn.Linear(self.d_in, self.emb_size)
-        self.time_embedding = FourierTimeEmbedding(self.emb_size)
+
+        if self.emb_type == 'fourier':
+            self.time_embedding = FourierTimeEmbedding(self.emb_size)
+        elif self.emb_type == 'linear':
+            self.time_embedding = nn.Linear(self.d_in, self.emb_size)
+        else:
+            raise ValueError("Invalid embedding type")
         self.dropout = nn.Dropout(self.emb_dropout)
-        self.mlp = MLP(self.emb_size, [self.d_model, self.d_model * 4, self.d_model])
+        # self.mlp = MLP(self.emb_size, [self.d_model, self.d_model * 4, self.d_model])
+        self.mlp = nn.Linear(self.emb_size, self.d_model)
 
         # transformer encoder
         self.transformer_encoder = nn.TransformerEncoder(
@@ -162,8 +171,6 @@ class TransformerDecoder(nn.Module):
             context = self.context_mlp(context)
             context = context.unsqueeze(1).expand(-1, x.size(1), -1)
             x = x + context
-
-        # 
         tgt_mask = models_utils.get_casual_mask(x.size(1), device=x.device)
 
         # pass through the transformer_decoder
