@@ -12,7 +12,7 @@ class NPE(nn.Module):
         hidden_sizes: int,
         num_transforms: int,
         context_embedding_sizes: Optional[int] = None,
-        dropout: int = 0.1,
+        dropout: int = 0.0,
     ) -> None:
         super().__init__()
         self.input_size = input_size
