@@ -51,7 +51,8 @@ class GRUDecoder(nn.Module):
         d_out: int,
         dim_feedforward: int,
         num_layers: int = 1,
-        activation_fn=nn.ReLU()
+        activation_fn=nn.ReLU(),
+        concat: bool = False
     ) -> None:
         """
         Parameters
@@ -68,15 +69,22 @@ class GRUDecoder(nn.Module):
             The size of the embedding. Default: 16
         activation_fn : callable, optional
             The activation function to use. Default: nn.ReLU()
+        concat: bool, optional
         """
         super().__init__()
 
         self.linear_x_proj = nn.Linear(d_in, d_model)
         self.linear_t_proj = nn.Linear(1, d_model)
-        self.gru_layers = nn.GRU(
-            d_model, dim_feedforward, num_layers=num_layers, batch_first=True)
+        if concat:
+            self.gru_layers = nn.GRU(
+                d_model * 2, dim_feedforward, num_layers=num_layers, batch_first=True)
+        else:
+            self.gru_layers = nn.GRU(
+                d_model, dim_feedforward, num_layers=num_layers, batch_first=True)
+
         self.linear = nn.Linear(dim_feedforward, d_out)
         self.activation_fn = activation_fn
+        self.concat = concat
 
     def forward(
         self,
@@ -86,7 +94,10 @@ class GRUDecoder(nn.Module):
         return_hidden_states: bool = False
     ) -> torch.Tensor:
         # project x and t
-        x = self.linear_x_proj(x) + self.linear_t_proj(t)
+        if self.concat:
+            x = torch.cat([self.linear_x_proj(x), self.linear_t_proj(t)], dim=-1)
+        else:
+            x = self.linear_x_proj(x) + self.linear_t_proj(t)
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, lengths, batch_first=True, enforce_sorted=False)
         x, hout = self.gru_layers(x)

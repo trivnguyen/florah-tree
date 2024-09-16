@@ -78,6 +78,7 @@ def train(
         scheduler_args=config.scheduler,
         training_args=config.training,
         norm_dict=norm_dict,
+        concat_npe_context=config.model.concat_npe_context,
     )
 
     # Create call backs and trainer objects
@@ -101,12 +102,14 @@ def train(
     train_logger = pl_loggers.TensorBoardLogger(workdir, version='')
     trainer = pl.Trainer(
         default_root_dir=workdir,
+        max_epochs=config.training.max_epochs,
         max_steps=config.training.max_steps,
         accelerator=config.accelerator,
         callbacks=callbacks,
         logger=train_logger,
         gradient_clip_val=config.training.get('gradient_clip_val', 0),
         enable_progress_bar=config.get("enable_progress_bar", True),
+        num_sanity_val_steps=0,
         # log_every_n_steps=config.training.log_every_n_steps,
         # val_check_interval=config.training.val_check_interval,
         # check_val_every_n_epoch=None,

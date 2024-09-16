@@ -23,6 +23,7 @@ class AutoregTreeGen(pl.LightningModule):
         scheduler_args: Union[ConfigDict, Dict] = None,
         training_args: Union[ConfigDict, Dict] = None,
         norm_dict: Optional[Dict] = None,
+        concat_npe_context: bool = False,
     ):
         """
         Parameters
@@ -48,6 +49,8 @@ class AutoregTreeGen(pl.LightningModule):
         norm_dict : dict, optional
             The normalization dictionary. For bookkeeping purposes only.
             Default: None
+        concat_npe_context : bool, optional
+            Whether to concatenate the context to the NPE. Default: True
         """
         super().__init__()
         self.d_in = d_in
@@ -60,6 +63,7 @@ class AutoregTreeGen(pl.LightningModule):
         self.scheduler_args = scheduler_args
         self.training_args = training_args
         self.norm_dict = norm_dict
+        self.concat_npe_context = concat_npe_context
         self.num_samples_per_graph = self.training_args.get('num_samples_per_graph', 1)
         self.training_mode = training_args.get('training_mode', 'all')
         self.class_loss_weight = training_args.get('class_loss_weight', 1.0)
@@ -82,6 +86,7 @@ class AutoregTreeGen(pl.LightningModule):
                 num_layers=self.encoder_args.num_layers,
                 emb_size=self.encoder_args.emb_size,
                 emb_dropout=self.encoder_args.emb_dropout,
+                concat=self.encoder_args.concat
             )
         else:
             raise NotImplementedError(
@@ -107,16 +112,25 @@ class AutoregTreeGen(pl.LightningModule):
                 d_out=self.decoder_args.d_out,
                 dim_feedforward=self.decoder_args.dim_feedforward,
                 num_layers=self.decoder_args.num_layers,
-                activation_fn=nn.ReLU()
+                activation_fn=nn.ReLU(),
+                concat=self.decoder_args.concat,
             )
         else:
             raise NotImplementedError(
                 f'Decoder {self.decoder_args.name} not implemented')
 
         # create the NPE
+        if self.concat_npe_context:
+            context_size = self.encoder_args.d_model + self.decoder_args.d_model
+        else:
+            if self.decoder_args.d_model != self.encoder_args.d_model:
+                raise ValueError(
+                    'When not concatenating NPE context, encoder and decoder '
+                    'dimension must be the same')
+            context_size = self.decoder_args.d_model
         self.npe = flows.NPE(
             input_size=self.d_in,
-            context_size=self.decoder_args.d_model,
+            context_size=context_size,
             hidden_sizes=self.npe_args.hidden_sizes,
             context_embedding_sizes=self.npe_args.context_embedding_sizes,
             num_transforms=self.npe_args.num_transforms,
@@ -228,7 +242,13 @@ class AutoregTreeGen(pl.LightningModule):
             )
 
         # 3. create the flows context
-        context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
+        if self.concat_npe_context:
+            context_flows = torch.cat([
+                x_dec,
+                x_enc_reduced.unsqueeze(1).expand(1, x_dec.size(1), 1)
+            ], dim=-1)
+        else:
+            context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
         context_flows = context_flows[~tgt_padding_mask]
 
         # 4. pass the encoded features through the classifier
