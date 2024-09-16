@@ -33,7 +33,7 @@ class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):
         if step < self.warmup_steps:
             return float(step) / float(max(1, self.warmup_steps))
         return self.eta_min + (
-            0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - warmup_steps))))
+            0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - self.warmup_steps))))
 
 
 class WarmUpCosineDecayLR(torch.optim.lr_scheduler.LambdaLR):
