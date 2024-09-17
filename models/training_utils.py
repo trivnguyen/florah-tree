@@ -43,7 +43,7 @@ def pad_sequences(sequences, max_len=None, padding_value=0):
 
     return torch.stack(padded_sequences), torch.tensor(original_lengths)
 
-def prepare_batch(batch, num_samples_per_graph=1):
+def prepare_batch(batch, num_samples_per_graph=1, return_weights=False):
     """ Prepare a batch for training.
 
     Parameters
@@ -52,15 +52,13 @@ def prepare_batch(batch, num_samples_per_graph=1):
         The batch to prepare.
     num_samples_per_graph : int
         The number of samples to take per graph.
-    one_hot : bool
-        Whether to use one-hot encoding for the classifier features.
-    num_classes : int
-        The number of classes for the classifier. If one_hot is True, this
-        parameter is required.
+    return_weights : bool
+        Whether to return the sample weights.
     """
 
     features = []
     out_features = []
+    weights = []
 
     for i in range(batch.num_graphs):
         # select a random node in the graph
@@ -81,12 +79,19 @@ def prepare_batch(batch, num_samples_per_graph=1):
             path = find_path_from_root(batch.edge_index, idx)
 
             features.append(batch.x[path])
+            if return_weights:
+                weights.append(batch.weight[i])
 
     # pad the features to the same length
     padded_features, lengths = pad_sequences(features)
     padded_out_features, out_lengths = pad_sequences(out_features)
 
-    return (padded_features, lengths, padded_out_features, out_lengths)
+    if return_weights:
+        weights = torch.tensor(weights, dtype=torch.float32)
+    else:
+        weights = torch.ones(len(features), dtype=torch.float32)
+
+    return (padded_features, lengths, padded_out_features, out_lengths, weights)
 
 
 def create_padding_mask(lengths, max_len, batch_first=False):
