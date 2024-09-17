@@ -86,11 +86,11 @@ def generate_tree(
         # start generating the next halo
         # 1. pass the input sequence through the encoder
         x_enc = model.encoder(src, src_t, src_padding_mask=None)
+        x_enc_reduced = models_utils.summarize_features(
+            x_enc, reduction='last', padding_mask=None)
 
         # 2. pass the encoded sequence through the classifier
         # sample the number of progenitors from the predicted distribution
-        x_enc_reduced = models_utils.summarize_features(
-            x_enc, reduction='mean', padding_mask=None)
         x_class = x_enc_reduced + model.classifier_context_embed(tgt_t)
         x_class = model.classifier(x_class)
         n_prog = torch.multinomial(x_class.softmax(dim=1), 1) + 1
@@ -100,15 +100,28 @@ def generate_tree(
         tgt_in = torch.zeros((1, n_prog+1, x_root.size(0)), device=device)
         for iprog in range(n_prog):
             # pass the encoded sequence through the decoder
-            x_dec = model.decoder(
-                tgt_in[:, :-1],
-                memory=x_enc,
-                context=tgt_t,
-                tgt_padding_mask=None,
-                memory_padding_mask=None
-            )
+            if model.decoder_args.name == 'transformer':
+                x_dec = model.decoder(
+                    tgt_in[:, :-1],
+                    memory=x_enc,
+                    context=tgt_t,
+                    tgt_padding_mask=None,
+                    memory_padding_mask=None
+                )
+            elif model.decoder_args.name == 'gru':
+                x_dec = model.decoder(
+                    x=tgt_in,
+                    t=tgt_t.unsqueeze(1).expand(-1, tgt_in.size(1), -1),
+                    lengths=torch.tensor([iprog+1, ], dtype=torch.long)
+                )
             # sample the next halo from the flows
-            context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
+            if model.concat_npe_context:
+                context_flows = torch.cat([
+                    x_dec,
+                    x_enc_reduced.unsqueeze(1).expand(1, x_dec.size(1), 1)
+                ], dim=-1)
+            else:
+                context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
             context_flows = context_flows[:, -1]
             tgt_in[:, iprog + 1] = model.npe.flow(model.npe(context_flows)).sample()
 
@@ -188,19 +201,32 @@ def generate_mb_batch(
         # pss the source sequence through the encoder
         x_enc = model.encoder(src, src_t, src_padding_mask=None)
         x_enc_reduced = models_utils.summarize_features(
-            x_enc, reduction='mean', padding_mask=None)
+            x_enc, reduction='last', padding_mask=None)
 
         # pass the encoded sequence through the decoder
         tgt_in = torch.zeros((x_root.size(0), 1, x_root.size(1)), device=device)
-        x_dec = model.decoder(
-            tgt_in,
-            memory=x_enc,
-            context=tgt_t,
-            tgt_padding_mask=None,
-            memory_padding_mask=None
-        )
+        if model.decoder_args.name == 'transformer':
+            x_dec = model.decoder(
+                tgt_in,
+                memory=x_enc_reduced.unsqueeze(1),
+                context=tgt_t,
+                tgt_padding_mask=None,
+                memory_padding_mask=None
+            )
+        elif model.decoder_args.name == 'gru':
+            x_dec = model.decoder(
+                x=tgt_in,
+                t=tgt_t.unsqueeze(1).expand(-1, tgt_in.size(1), -1),
+                lengths=torch.ones((1, ), dtype=torch.long)
+            )
         # sample the next halo from the flows
-        context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
+        if model.concat_npe_context:
+            context_flows = torch.cat([
+                x_dec,
+                x_enc_reduced.unsqueeze(1).expand(1, x_dec.size(1), 1)
+            ], dim=-1)
+        else:
+            context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
         context_flows = context_flows[:, -1]
         halo_feats[:, i+1] = model.npe.flow(model.npe(context_flows)).sample()
 
