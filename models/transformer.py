@@ -72,19 +72,25 @@ class TransformerEncoder(nn.Module):
 
     def _setup_model(self) -> None:
         # embedding layers
-        self.embedding = nn.Linear(self.d_in, self.emb_size)
-        if self.emb_type == 'fourier':
-            self.time_embedding = FourierTimeEmbedding(self.emb_size)
-        elif self.emb_type == 'linear':
-            self.time_embedding = nn.Linear(1, self.emb_size)
-        else:
-            raise ValueError("Invalid embedding type")
-        self.dropout = nn.Dropout(self.emb_dropout)
+        if self.emb_type == 'legacy':
+            self.embedding = nn.Identity()
+            self.time_embedding = nn.Identity()
+            self.dropout = nn.Dropout(0.0)
+            self.mlp = nn.Linear(self.d_in + 1, self.d_model)
 
-        if self.concat:
-            self.mlp = nn.Linear(self.emb_size * 2, self.d_model)
         else:
-            self.mlp = nn.Linear(self.emb_size, self.d_model)
+            self.embedding = nn.Linear(self.d_in, self.emb_size)
+            if self.emb_type == 'fourier':
+                self.time_embedding = FourierTimeEmbedding(self.emb_size)
+            elif self.emb_type == 'linear':
+                self.time_embedding = nn.Linear(1, self.emb_size)
+            else:
+                raise ValueError("Invalid embedding type")
+            self.dropout = nn.Dropout(self.emb_dropout)
+            if self.concat:
+                self.mlp = nn.Linear(self.emb_size * 2, self.d_model)
+            else:
+                self.mlp = nn.Linear(self.emb_size, self.d_model)
 
         # transformer encoder
         self.transformer_encoder = nn.TransformerEncoder(
@@ -101,7 +107,7 @@ class TransformerEncoder(nn.Module):
     ) -> torch.Tensor:
 
         # embed the input and timestep
-        if self.concat:
+        if self.concat or self.emb_type == 'legacy':
             x = torch.cat([self.embedding(src), self.time_embedding(src_t)], dim=-1)
         else:
             x = self.embedding(src) + self.time_embedding(src_t)
