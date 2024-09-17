@@ -229,10 +229,10 @@ class AutoregTreeGen(pl.LightningModule):
         if self.decoder_args.name == 'transformer':
             x_dec = self.decoder(
                 tgt_in,
-                memory=x_enc,
+                memory=x_enc_reduced.unsqueeze(1),
                 context=tgt_t,
                 tgt_padding_mask=tgt_padding_mask,
-                memory_padding_mask=src_padding_mask
+                memory_padding_mask=None
             )
         elif self.decoder_args.name == 'gru':
             x_dec = self.decoder(
