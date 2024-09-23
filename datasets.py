@@ -12,12 +12,12 @@ from torch_geometric.utils import from_networkx, to_networkx
 
 def read_dataset(
     dataset_name: str, dataset_root: str, max_num_files: int = 1,
-    verbose: bool = True
+    verbose: bool = True, prefix: str = "data"
 ):
     data = []
     data_dir = os.path.join(dataset_root, dataset_name)
     for i in range(max_num_files):
-        data_path = os.path.join(data_dir, "data.{}.pkl".format(i))
+        data_path = os.path.join(data_dir, "{}.{}.pkl".format(prefix, i))
         if os.path.exists(data_path):
             with open(data_path, 'rb') as f:
                 data += pickle.load(f)
@@ -27,6 +27,8 @@ def read_dataset(
             if verbose:
                 print("Data file {} not found. Stopping".format(data_path))
             break
+    if len(data) == 0:
+        raise ValueError("No data found in the specified directory.")
 
     if not isinstance(data[0], Data):
         data = [from_networkx(d) for d in data]
