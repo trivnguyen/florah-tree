@@ -81,7 +81,7 @@ def generate_tree(
             torch.tensor(edge_index, dtype=torch.long), halo_curr_index)
         src = halo_feats[path].unsqueeze(0)  # add batch dim
         src_t = t_out[:halo_curr_t_index+1].unsqueeze(0)  # add batch dim
-        tgt_t = t_out[halo_curr_t_index + 1].unsqueeze(0).unsqueeze(0)  # add batch and feature dim
+        tgt_t = t_out[halo_curr_t_index + 1].unsqueeze(0) # add batch dim
 
         # start generating the next halo
         # 1. pass the input sequence through the encoder
@@ -93,7 +93,7 @@ def generate_tree(
         # sample the number of progenitors from the predicted distribution
         x_class = x_enc_reduced + model.classifier_context_embed(tgt_t)
         x_class = model.classifier(x_class)
-        n_prog = torch.multinomial(x_class.softmax(dim=1), 1) + 1
+        n_prog = torch.multinomial(x_class.softmax(dim=-1), 1) + 1
         n_prog = n_prog.item()
 
         # 3. create the progenitors using the decoder and the flows
@@ -125,8 +125,9 @@ def generate_tree(
             context_flows = context_flows[:, -1]
             tgt_in[:, iprog + 1] = model.npe.flow(model.npe(context_flows)).sample()
 
+        # print(time_feats.shape, halo_feats.shape, n_prog, tgt_in.shape, tgt_t.shape)
         halo_feats = torch.cat([halo_feats, tgt_in[0, 1:]], dim=0)
-        time_feats = torch.cat([time_feats, tgt_t[0].repeat(n_prog)], dim=0)
+        time_feats = torch.cat([time_feats, tgt_t.repeat(n_prog, 1)], dim=0)
 
         # create halo index for the progenitors
         prog_index = [next_halo_index + i for i in range(n_prog)]
@@ -147,7 +148,7 @@ def generate_tree(
     halo_feats = halo_feats * x_scale + x_loc
     time_feats = time_feats * t_scale + t_loc
     return Data(
-        x=torch.cat([halo_feats, time_feats.unsqueeze(1)], dim=1),
+        x=torch.cat([halo_feats, time_feats], dim=1),
         edge_index=torch.tensor(edge_index, dtype=torch.long)
     )
 
@@ -199,9 +200,18 @@ def generate_mb_batch(
         tgt_t = t_out[:, i + 1]
 
         # pss the source sequence through the encoder
-        x_enc = model.encoder(src, src_t, src_padding_mask=None)
-        x_enc_reduced = models_utils.summarize_features(
-            x_enc, reduction='last', padding_mask=None)
+        if model.encoder_args.name == 'transformer':
+            x_enc = model.encoder(src, src_t, src_padding_mask=None)
+            x_enc_reduced = models_utils.summarize_features(
+                x_enc, reduction='last', padding_mask=None)
+        elif model.encoder_args.name == 'gru':
+            x_enc = model.encoder(
+                src,
+                src_t,
+                lengths=torch.tensor([i + 1, ], dtype=torch.long).expand(src.size(0))
+            )
+            x_enc_reduced = models_utils.summarize_features(
+                x_enc, reduction='last', padding_mask=None)
 
         # pass the encoded sequence through the decoder
         tgt_in = torch.zeros((x_root.size(0), 1, x_root.size(1)), device=device)
