@@ -33,6 +33,7 @@ class AutoregTreeGenMB(pl.LightningModule):
             d_out=self.encoder_args.d_out,
             dim_feedforward=self.encoder_args.dim_feedforward,
             num_layers=self.encoder_args.num_layers,
+            d_time=2,
             activation_fn=nn.ReLU(),
             concat=self.encoder_args.concat,
         )
@@ -52,7 +53,7 @@ class AutoregTreeGenMB(pl.LightningModule):
 
         # divide the data into input and target, each shifted by one time step
         src, tgt = x[:, :-1], x[:, 1:]
-        src_t, tgt_t = t[:, :-1], t[:, 1:]
+        src_t = torch.cat([t[:, :-1], t[:, 1:]], dim=-1)
         src_len = feat_len - 1
         src_len = tgt_len = src_len.cpu()
 
@@ -64,7 +65,6 @@ class AutoregTreeGenMB(pl.LightningModule):
         src = src.to(self.device)
         tgt = tgt.to(self.device)
         src_t = src_t.to(self.device)
-        tgt_t = tgt_t.to(self.device)
         tgt_padding_mask = tgt_padding_mask.to(self.device)
 
         return {
@@ -72,7 +72,6 @@ class AutoregTreeGenMB(pl.LightningModule):
             "src_t": src_t,
             "src_len": src_len,
             "tgt": tgt,
-            "tgt_t": tgt_t,
             "tgt_len": tgt_len,
             "tgt_padding_mask": tgt_padding_mask,
             "batch_size": x.size(0),

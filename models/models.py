@@ -51,6 +51,7 @@ class GRUDecoder(nn.Module):
         d_out: int,
         dim_feedforward: int,
         num_layers: int = 1,
+        d_time: int = 1,
         activation_fn=nn.ReLU(),
         concat: bool = False
     ) -> None:
@@ -74,7 +75,7 @@ class GRUDecoder(nn.Module):
         super().__init__()
 
         self.linear_x_proj = nn.Linear(d_in, d_model)
-        self.linear_t_proj = nn.Linear(1, d_model)
+        self.linear_t_proj = nn.Linear(d_time, d_model)
         if concat:
             self.gru_layers = nn.GRU(
                 d_model * 2, dim_feedforward, num_layers=num_layers, batch_first=True)
