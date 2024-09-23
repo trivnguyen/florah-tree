@@ -58,3 +58,12 @@ class NPE(nn.Module):
         if context is not None:
             context = self.forward(context)
         return self.flow(context).log_prob(x)
+
+    def sample(
+        self,
+        context: Optional[torch.Tensor] = None,
+        **kwargs
+    ) -> torch.Tensor:
+        if context is not None:
+            context = self.forward(context)
+        return self.flow(context).sample(**kwargs)
