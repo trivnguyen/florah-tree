@@ -99,6 +99,16 @@ class AutoregTreeGen(pl.LightningModule):
                 emb_dropout=self.encoder_args.emb_dropout,
                 concat=self.encoder_args.concat
             )
+        elif self.encoder_args.name == 'gru':
+            self.encoder = GRUDecoder(
+                d_in=self.d_in,
+                d_model=self.encoder_args.d_model,
+                d_out=self.encoder_args.d_out,
+                dim_feedforward=self.encoder_args.dim_feedforward,
+                num_layers=self.encoder_args.num_layers,
+                activation_fn=nn.ReLU(),
+                concat=self.encoder_args.concat,
+            )
         else:
             raise NotImplementedError(
                 f'Encoder {self.encoder_args.name} not implemented')
@@ -150,9 +160,9 @@ class AutoregTreeGen(pl.LightningModule):
 
         # create the classifier
         self.classifier_context_embed = nn.Linear(
-            self.classifier_args.d_context, self.encoder.d_model)
+            self.classifier_args.d_context, self.encoder_args.d_model)
         self.classifier = MLP(
-            d_in=self.encoder.d_model,
+            d_in=self.encoder_args.d_model,
             hidden_sizes=self.classifier_args.hidden_sizes + [self.num_classes,],
         )
 
@@ -235,13 +245,22 @@ class AutoregTreeGen(pl.LightningModule):
                 Padding mask for the RNN/Flows model.
         """
         # 1. pass the input sequence through the encoder
-        x_enc = self.encoder(
-            src,
-            src_t,
-            src_padding_mask=src_padding_mask
-        )
-        x_enc_reduced = models_utils.summarize_features(
-            x_enc, reduction='last', padding_mask=src_padding_mask)
+        if self.encoder_args.name == 'transformer':
+            x_enc = self.encoder(
+                src,
+                src_t,
+                src_padding_mask=src_padding_mask
+            )
+            x_enc_reduced = models_utils.summarize_features(
+                x_enc, reduction='last', padding_mask=src_padding_mask)
+        elif self.encoder_args.name == 'gru':
+            x_enc = self.encoder(
+                x=src,
+                t=src_t,
+                lengths=src_padding_mask.eq(0).sum(-1).cpu(),
+            )
+            x_enc_reduced = models_utils.summarize_features(
+                x_enc, reduction='last', padding_mask=src_padding_mask)
 
         # 2. pass the encoded features through the decoder
         # using the output time steps as the context
