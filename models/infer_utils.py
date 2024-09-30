@@ -196,8 +196,11 @@ def generate_mb_batch(
 
     for i in range(n_t-1):
         src = halo_feats[:, :i + 1]
-        src_t = t_out[:, :i + 1]
         tgt_t = t_out[:, i + 1]
+        if model.concat_time:
+            src_t = torch.cat([t_out[:, :i + 1], t_out[:, 1:i+2]], dim=-1)
+        else:
+            src_t = t_out[:, :i + 1]
 
         # pss the source sequence through the encoder
         if model.encoder_args.name == 'transformer':
@@ -214,7 +217,11 @@ def generate_mb_batch(
                 x_enc, reduction='last', padding_mask=None)
 
         # pass the encoded sequence through the decoder
-        tgt_in = torch.zeros((x_root.size(0), 1, x_root.size(1)), device=device)
+        if model.use_sos_embedding:
+            tgt_in = model.sos_embedding(x_enc_reduced).unsqueeze(1)
+        else:
+            tgt_in = torch.zeros((x_root.size(0), 1, x_root.size(1)), device=device)
+
         if model.decoder_args.name == 'transformer':
             x_dec = model.decoder(
                 tgt_in,

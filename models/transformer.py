@@ -53,6 +53,7 @@ class TransformerEncoder(nn.Module):
         nhead: int = 1,
         dim_feedforward: int = 128,
         num_layers: int = 1,
+        d_time: int = 1,
         emb_size: int = 16,
         emb_dropout: float = 0.1,
         emb_type: str = 'fourier',
@@ -64,6 +65,7 @@ class TransformerEncoder(nn.Module):
         self.nhead = nhead
         self.dim_feedforward = dim_feedforward
         self.num_layers = num_layers
+        self.d_time = d_time
         self.emb_size = emb_size
         self.emb_dropout = emb_dropout
         self.emb_type = emb_type
@@ -76,14 +78,17 @@ class TransformerEncoder(nn.Module):
             self.embedding = nn.Identity()
             self.time_embedding = nn.Identity()
             self.dropout = nn.Dropout(0.0)
-            self.mlp = nn.Linear(self.d_in + 1, self.d_model)
+            self.mlp = nn.Linear(self.d_in + self.d_time, self.d_model)
 
         else:
             self.embedding = nn.Linear(self.d_in, self.emb_size)
             if self.emb_type == 'fourier':
-                self.time_embedding = FourierTimeEmbedding(self.emb_size)
+                if self.emb_size % self.d_time != 0:
+                    raise ValueError("Embedding size must be divisible by time dimension")
+                emb_size = self.emb_size // self.d_time
+                self.time_embedding = FourierTimeEmbedding(emb_size)
             elif self.emb_type == 'linear':
-                self.time_embedding = nn.Linear(1, self.emb_size)
+                self.time_embedding = nn.Linear(self.d_time, self.emb_size)
             else:
                 raise ValueError("Invalid embedding type")
             self.dropout = nn.Dropout(self.emb_dropout)

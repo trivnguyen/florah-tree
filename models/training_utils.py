@@ -43,7 +43,7 @@ def pad_sequences(sequences, max_len=None, padding_value=0):
 
     return torch.stack(padded_sequences), torch.tensor(original_lengths)
 
-def prepare_batch(batch, num_samples_per_graph=1, return_weights=False):
+def prepare_batch(batch, num_samples_per_graph=1, return_weights=False, all_nodes=False):
     """ Prepare a batch for training.
 
     Parameters
@@ -54,6 +54,8 @@ def prepare_batch(batch, num_samples_per_graph=1, return_weights=False):
         The number of samples to take per graph.
     return_weights : bool
         Whether to return the sample weights.
+    all_nodes : bool
+        If True, take all nodes instead of sampling. Overrides num_samples_per_graph.
     """
 
     features = []
@@ -61,11 +63,15 @@ def prepare_batch(batch, num_samples_per_graph=1, return_weights=False):
     weights = []
 
     for i in range(batch.num_graphs):
-        # select a random node in the graph
-        random_node_idx = torch.randint(
-            batch.ptr[i], batch.ptr[i + 1], (num_samples_per_graph,))
+        if all_nodes:
+            # select all nodes in the graph
+            select_nodes = torch.arange(batch.ptr[i], batch.ptr[i + 1])
+        else:
+            # select a random node in the graph
+            select_nodes = torch.randint(
+                batch.ptr[i], batch.ptr[i + 1], (num_samples_per_graph,))
 
-        for idx in random_node_idx:
+        for idx in select_nodes:
             # get the ancestors of the selected node and skip if there are none
             ancestors = find_ancestor_indices(batch.edge_index, idx)
             if ancestors.nelement() == 0:

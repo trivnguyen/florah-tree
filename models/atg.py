@@ -23,6 +23,8 @@ class AutoregTreeGen(pl.LightningModule):
         training_args: Union[ConfigDict, Dict] = None,
         norm_dict: Optional[Dict] = None,
         concat_npe_context: bool = False,
+        concat_time: bool = False,
+        use_sos_embedding: bool = False,
     ):
         """
         Parameters
@@ -50,6 +52,12 @@ class AutoregTreeGen(pl.LightningModule):
             Default: None
         concat_npe_context : bool, optional
             Whether to concatenate the context to the NPE. Default: True
+        concat_time : bool, optional
+            If True, concat the input and output time. Default: False
+        use_sos_embedding : bool, optional
+            If True, use an embedding layer for the start of sequence token, instead of
+            zero-padding. The embedding layer takes in the encoder output. Only
+            applicable for GRU decoder. Default: False.
         """
         super().__init__()
         self.d_in = d_in
@@ -62,6 +70,8 @@ class AutoregTreeGen(pl.LightningModule):
         self.scheduler_args = scheduler_args
         self.norm_dict = norm_dict
         self.concat_npe_context = concat_npe_context
+        self.concat_time = concat_time
+        self.use_sos_embedding = use_sos_embedding
 
         # training args
         training_args_default = ConfigDict({
@@ -70,7 +80,8 @@ class AutoregTreeGen(pl.LightningModule):
             'class_loss_weight': 1.0,
             'use_sample_weights': False,
             'max_weight': 100,
-            'old_flows_loss': True
+            'old_flows_loss': True,
+            'all_nodes': False,
         })
         self.training_args = training_args_default
         if training_args is not None:
@@ -88,6 +99,7 @@ class AutoregTreeGen(pl.LightningModule):
     def _setup_model(self):
 
         # create the transformer
+        d_time = 2 if self.concat_time else 1
         if self.encoder_args.name == 'transformer':
             self.encoder = TransformerEncoder(
                 d_in=self.d_in,
@@ -95,6 +107,7 @@ class AutoregTreeGen(pl.LightningModule):
                 nhead=self.encoder_args.nhead,
                 dim_feedforward=self.encoder_args.dim_feedforward,
                 num_layers=self.encoder_args.num_layers,
+                d_time=d_time,
                 emb_size=self.encoder_args.emb_size,
                 emb_dropout=self.encoder_args.emb_dropout,
                 concat=self.encoder_args.concat
@@ -106,6 +119,7 @@ class AutoregTreeGen(pl.LightningModule):
                 d_out=self.encoder_args.d_out,
                 dim_feedforward=self.encoder_args.dim_feedforward,
                 num_layers=self.encoder_args.num_layers,
+                d_time=d_time,
                 activation_fn=nn.ReLU(),
                 concat=self.encoder_args.concat,
             )
@@ -166,16 +180,32 @@ class AutoregTreeGen(pl.LightningModule):
             hidden_sizes=self.classifier_args.hidden_sizes + [self.num_classes,],
         )
 
+        # other layers
+        if self.use_sos_embedding and self.decoder_args.name == 'gru':
+            self.sos_embedding = MLP(
+                d_in=self.encoder_args.d_model,
+                hidden_sizes=[self.encoder_args.d_model, self.d_in],
+            )
+        else:
+            self.sos_embedding = None
+
     def _prepare_batch(self, batch):
         """ Prepare the batch for training. """
         src_feat, src_len, tgt_feat, tgt_len, weights  = training_utils.prepare_batch(
             batch,
             num_samples_per_graph=self.training_args.num_samples_per_graph,
-            return_weights=self.training_args.use_sample_weights
+            return_weights=self.training_args.use_sample_weights,
+            all_nodes=self.training_args.all_nodes,
         )
 
         # Processing Transformer input and time steps
-        src, src_t = src_feat[..., :-1], src_feat[..., -1:]
+        src = src_feat[..., :-1]
+        if not self.concat_time:
+            src_t = src_feat[..., -1:]
+        else:
+            src_t1 = src_feat[..., -1:]
+            src_t2 = torch.cat([src_feat[:, 1:, -1:], tgt_feat[:, :1, -1:]], dim=1)
+            src_t = torch.cat([src_t1, src_t2], dim=-1)
         src_padding_mask = training_utils.create_padding_mask(
             src_len, src_feat.size(1), batch_first=True)
 
@@ -273,6 +303,10 @@ class AutoregTreeGen(pl.LightningModule):
                 memory_padding_mask=None
             )
         elif self.decoder_args.name == 'gru':
+            if self.use_sos_embedding:
+                sos_embed = self.sos_embedding(x_enc_reduced)
+                tgt_in[:, 0] = sos_embed
+
             x_dec = self.decoder(
                 x=tgt_in,
                 t=tgt_t.unsqueeze(1).expand(-1, tgt_in.size(1), -1),
