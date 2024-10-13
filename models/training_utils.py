@@ -29,19 +29,62 @@ def find_ancestor_indices(edge_index, node):
 
     return ancestors
 
+# def pad_sequences(sequences, max_len=None, padding_value=0):
+#     if max_len is None:
+#         max_len = max(len(seq) for seq in sequences)
+
+#     padded_sequences = []
+#     original_lengths = []
+#     for seq in sequences:
+#         original_lengths.append(len(seq))
+#         padding_length = max_len - len(seq)
+#         padded_seq = nn.functional.pad(seq, (0, 0, 0, padding_length), value=padding_value)
+#         padded_sequences.append(padded_seq)
+
+    # return torch.stack(padded_sequences), torch.tensor(original_lengths)
+
 def pad_sequences(sequences, max_len=None, padding_value=0):
     if max_len is None:
         max_len = max(len(seq) for seq in sequences)
+    seq_dim = sequences[0].dim()
 
     padded_sequences = []
     original_lengths = []
     for seq in sequences:
         original_lengths.append(len(seq))
         padding_length = max_len - len(seq)
-        padded_seq = nn.functional.pad(seq, (0, 0, 0, padding_length), value=padding_value)
+        pad = [0] * (seq_dim * 2)
+        pad[-1] = padding_length
+        padded_seq = nn.functional.pad(seq, pad, value=padding_value)
         padded_sequences.append(padded_seq)
 
     return torch.stack(padded_sequences), torch.tensor(original_lengths)
+
+def create_padding_mask(lengths, max_len, batch_first=False):
+    """ Create a padding mask. """
+    batch_size = lengths.size(0)
+
+    # Generate a mask with shape [batch_size, seq_len]
+    mask = torch.arange(max_len).expand(batch_size, max_len) >= lengths.unsqueeze(1)
+    if not batch_first:
+        mask = mask.transpose(0, 1)
+    return mask
+
+def get_leaves(data):
+    """
+    Identify and return the leaf nodes in a graph.
+
+    Parameters:
+    data (torch_geometric.data.Data): The input graph data containing edge_index and num_nodes.
+
+    Returns:
+    torch.Tensor: A tensor containing the indices of the leaf nodes.
+    """
+    edge_index = data.edge_index
+    source_nodes = edge_index[0].unique()
+    all_nodes = torch.arange(data.num_nodes)
+    leaf_nodes = all_nodes[~torch.isin(all_nodes, source_nodes)]
+    return leaf_nodes
 
 def prepare_batch(batch, num_samples_per_graph=1, return_weights=False, all_nodes=False):
     """ Prepare a batch for training.
@@ -99,13 +142,54 @@ def prepare_batch(batch, num_samples_per_graph=1, return_weights=False, all_node
 
     return (padded_features, lengths, padded_out_features, out_lengths, weights)
 
+def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False):
+    """ Prepare a batch for training.
 
-def create_padding_mask(lengths, max_len, batch_first=False):
-    """ Create a padding mask. """
-    batch_size = lengths.size(0)
+    Parameters
+    ----------
+    batch : torch_geometric.data.Batch
+        The batch to prepare.
+    max_split : int
+        The maximum number of progenitors to consider.
+    return_weights : bool
+        Whether to return the sample weights.
+    all_nodes : bool
+        If True, take all nodes instead of sampling. Overrides num_samples_per_graph.
+    """
+    in_features = []
+    out_features = []
+    num_progenitors = []
+    weights = []
 
-    # Generate a mask with shape [batch_size, seq_len]
-    mask = torch.arange(max_len).expand(batch_size, max_len) >= lengths.unsqueeze(1)
-    if not batch_first:
-        mask = mask.transpose(0, 1)
-    return mask
+    for i in range(batch.num_graphs):
+        graph = batch[i]
+        leaves = get_leaves(graph)
+        parents = graph.edge_index[0, torch.isin(graph.edge_index[1], leaves)]
+        parents = parents[leaves-1 == parents]
+
+        for idx in parents:
+            path = training_utils.find_path_from_root(graph.edge_index, idx)
+            adj = to_dense_adj(graph.edge_index)[0]
+            num_prog = torch.sum(adj[path], axis=1, dtype=torch.long)
+
+            in_features.append(graph.x[path])
+            num_progenitors.append(num_prog)
+
+            out = torch.zeros((len(path), max_split, graph.x.size(1)))
+            for i, node in enumerate(path):
+                out[i][:num_prog[i]] += graph.x[adj[node].eq(1)]
+            out_features.append(out)
+
+            if return_weights:
+                weights.append(graph.weight[path])
+
+    padded_features, lengths = training_utils.pad_sequences(in_features)
+    padded_out_features, _ = training_utils.pad_sequences(out_features)
+    num_progenitors, _ = training_utils.pad_sequences(num_progenitors)
+
+    if return_weights:
+        weights = torch.tensor(weights, dtype=torch.float32)
+    else:
+        weights = torch.ones(len(features), dtype=torch.float32)
+
+    return (padded_features, padded_out_features, num_progenitors, lengths, weights)
