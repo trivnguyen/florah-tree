@@ -85,9 +85,18 @@ def generate_tree(
 
         # start generating the next halo
         # 1. pass the input sequence through the encoder
-        x_enc = model.encoder(src, src_t, src_padding_mask=None)
-        x_enc_reduced = models_utils.summarize_features(
-            x_enc, reduction='last', padding_mask=None)
+        if model.encoder_args.name == 'transformer':
+            x_enc = model.encoder(src, src_t, src_padding_mask=None)
+            x_enc_reduced = models_utils.summarize_features(
+                x_enc, reduction='last', padding_mask=None)
+        elif model.encoder_args.name == 'gru':
+            x_enc = model.encoder(
+                x=src,
+                t=src_t,
+                lengths=torch.tensor([src.size(1), ], dtype=torch.long)
+            )
+            x_enc_reduced = models_utils.summarize_features(
+                x_enc, reduction='last', padding_mask=None)
 
         # 2. pass the encoded sequence through the classifier
         # sample the number of progenitors from the predicted distribution

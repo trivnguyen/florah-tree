@@ -1,7 +1,7 @@
 
 import torch
 import torch.nn as nn
-
+from torch_geometric.utils import to_dense_adj
 
 def find_path_from_root(edge_index, node):
     path = [node]
@@ -80,9 +80,9 @@ def get_leaves(data):
     Returns:
     torch.Tensor: A tensor containing the indices of the leaf nodes.
     """
-    edge_index = data.edge_index
+    edge_index = data.edge_index.to(data.x.device)
     source_nodes = edge_index[0].unique()
-    all_nodes = torch.arange(data.num_nodes)
+    all_nodes = torch.arange(data.num_nodes, device=data.x.device)
     leaf_nodes = all_nodes[~torch.isin(all_nodes, source_nodes)]
     return leaf_nodes
 
@@ -156,7 +156,7 @@ def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False
     all_nodes : bool
         If True, take all nodes instead of sampling. Overrides num_samples_per_graph.
     """
-    in_features = []
+    features = []
     out_features = []
     num_progenitors = []
     weights = []
@@ -168,14 +168,14 @@ def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False
         parents = parents[leaves-1 == parents]
 
         for idx in parents:
-            path = training_utils.find_path_from_root(graph.edge_index, idx)
+            path = find_path_from_root(graph.edge_index, idx)
             adj = to_dense_adj(graph.edge_index)[0]
             num_prog = torch.sum(adj[path], axis=1, dtype=torch.long)
 
-            in_features.append(graph.x[path])
+            features.append(graph.x[path])
             num_progenitors.append(num_prog)
 
-            out = torch.zeros((len(path), max_split, graph.x.size(1)))
+            out = torch.zeros((len(path), max_split, graph.x.size(1)), device=graph.x.device)
             for i, node in enumerate(path):
                 out[i][:num_prog[i]] += graph.x[adj[node].eq(1)]
             out_features.append(out)
@@ -183,9 +183,9 @@ def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False
             if return_weights:
                 weights.append(graph.weight[path])
 
-    padded_features, lengths = training_utils.pad_sequences(in_features)
-    padded_out_features, _ = training_utils.pad_sequences(out_features)
-    num_progenitors, _ = training_utils.pad_sequences(num_progenitors)
+    padded_features, lengths = pad_sequences(features)
+    padded_out_features, _ = pad_sequences(out_features)
+    num_progenitors, _ = pad_sequences(num_progenitors)
 
     if return_weights:
         weights = torch.tensor(weights, dtype=torch.float32)
