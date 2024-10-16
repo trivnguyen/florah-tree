@@ -323,6 +323,7 @@ class AutoregTreeGenOpt(pl.LightningModule):
             src_padding_mask=batch_dict['src_padding_mask'],
             tgt_padding_mask=batch_dict['tgt_padding_mask'],
         )
+
         # compute the flow loss
         if self.training_args.training_mode in ('all', 'npe'):
             lp = self.npe.log_prob(batch_dict['tgt_out'], context=context_flows)

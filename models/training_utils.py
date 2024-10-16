@@ -160,6 +160,7 @@ def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False
     out_features = []
     num_progenitors = []
     weights = []
+    max_num_prog_batch = 0
 
     for i in range(batch.num_graphs):
         graph = batch[i]
@@ -171,6 +172,7 @@ def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False
             path = find_path_from_root(graph.edge_index, idx)
             adj = to_dense_adj(graph.edge_index)[0]
             num_prog = torch.sum(adj[path], axis=1, dtype=torch.long)
+            max_num_prog_batch = max(max_num_prog_batch, num_prog.max().item())
 
             features.append(graph.x[path])
             num_progenitors.append(num_prog)
@@ -185,6 +187,7 @@ def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False
 
     padded_features, lengths = pad_sequences(features)
     padded_out_features, _ = pad_sequences(out_features)
+    padded_out_features = padded_out_features[:, :, :max_num_prog_batch]
     num_progenitors, _ = pad_sequences(num_progenitors)
 
     if return_weights:
