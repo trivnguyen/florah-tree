@@ -151,29 +151,3 @@ if __name__ == "__main__":
 
     # Start training run
     train(config=FLAGS.config, workdir=FLAGS.config.workdir)
-    # Create call backs and trainer objects
-    callbacks = [
-        pl.callbacks.EarlyStopping(
-            monitor=config.training.get('monitor', 'val_loss'),
-            patience=config.training.get('patience', 1000),
-            mode='min',
-            verbose=True
-        ),
-        pl.callbacks.ModelCheckpoint(
-            filename="best-{epoch}-{step}-{val_loss:.4f}",
-            monitor=config.training.get('monitor', 'val_loss'),
-            save_top_k=config.training.get('save_top_k', 1),
-            mode='min',
-            save_weights_only=False,
-            save_last=False
-        ),
-        pl.callbacks.ModelCheckpoint(
-            filename="last-{epoch}-{step}-{val_loss:.4f}",
-            save_top_k=config.training.get('save_last_k', 1),
-            monitor='epoch',
-            mode='max',
-            save_weights_only=False,
-            save_last=False
-        ),
-        pl.callbacks.LearningRateMonitor("step"),
-    ]
