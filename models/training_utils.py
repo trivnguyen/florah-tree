@@ -142,7 +142,7 @@ def prepare_batch(batch, num_samples_per_graph=1, return_weights=False, all_node
 
     return (padded_features, lengths, padded_out_features, out_lengths, weights)
 
-def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False):
+def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False, use_desc_mass_ratio=False):
     """ Prepare a batch for training.
 
     Parameters
@@ -155,6 +155,9 @@ def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False
         Whether to return the sample weights.
     all_nodes : bool
         If True, take all nodes instead of sampling. Overrides num_samples_per_graph.
+    use_desc_mass_ratio: bool
+        If True, out_features is a ratio of the descendants of the selected node.
+        Assuming that index of the mass feature is 0.
     """
     features = []
     out_features = []
@@ -179,7 +182,10 @@ def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False
 
             out = torch.zeros((len(path), max_split, graph.x.size(1)), device=graph.x.device)
             for i, node in enumerate(path):
-                out[i][:num_prog[i]] += graph.x[adj[node].eq(1)]
+                temp = graph.x[adj[node].eq(1)]
+                if use_desc_mass_ratio:
+                    temp[:, 0] = temp[:, 0] - graph.x[node, 0]
+                out[i][:num_prog[i]] += temp
             out_features.append(out)
 
             if return_weights:

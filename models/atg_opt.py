@@ -75,6 +75,7 @@ class AutoregTreeGenOpt(pl.LightningModule):
             'class_loss_weight': 1.0,
             'use_sample_weights': False,
             'max_weight': 100,
+            'use_desc_mass_ratio': False,
         })
         self.training_args = training_args_default
         if training_args is not None:
@@ -187,7 +188,8 @@ class AutoregTreeGenOpt(pl.LightningModule):
         src_feat, tgt_feat, num_prog, src_len, weights  = training_utils.prepare_batch_branch(
             batch,
             max_split=self.num_classes,
-            return_weights=self.training_args.use_sample_weights
+            return_weights=self.training_args.use_sample_weights,
+            use_desc_mass_ratio=self.training_args.use_desc_mass_ratio,
         )
         # Processing Transformer input and time steps
         src, src_t = src_feat[..., :-1], src_feat[..., -1:]
