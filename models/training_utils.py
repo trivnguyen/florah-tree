@@ -142,7 +142,8 @@ def prepare_batch(batch, num_samples_per_graph=1, return_weights=False, all_node
 
     return (padded_features, lengths, padded_out_features, out_lengths, weights)
 
-def prepare_batch_branch(batch, max_split, return_weights=False, all_nodes=False, use_desc_mass_ratio=False):
+def prepare_batch_branch(
+    batch, max_split, return_weights=False, all_nodes=False, use_desc_mass_ratio=False):
     """ Prepare a batch for training.
 
     Parameters
