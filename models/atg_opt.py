@@ -76,6 +76,8 @@ class AutoregTreeGenOpt(pl.LightningModule):
             'use_sample_weights': False,
             'max_weight': 100,
             'use_desc_mass_ratio': False,
+            'append_src_to_tgt': False,
+            'add_src_to_tgt': False,
         })
         self.training_args = training_args_default
         if training_args is not None:
@@ -83,9 +85,6 @@ class AutoregTreeGenOpt(pl.LightningModule):
         if self.training_args.training_mode not in ('all', 'classifier', 'npe'):
             raise ValueError(
                 f'Training mode {self.training_mode} not supported')
-        if self.training_args.old_flows_loss and self.training_args.use_sample_weights:
-            raise ValueError(
-                f'Options old_flows_loss and use_sample_weights are not compatible')
         self.save_hyperparameters()
 
         self._setup_model()
@@ -122,9 +121,13 @@ class AutoregTreeGenOpt(pl.LightningModule):
                 f'Encoder {self.encoder_args.name} not implemented')
 
         # create the RNN and flows
+        if self.training_args.append_src_to_tgt:
+            decoder_d_in = self.d_in * 2
+        else:
+            decoder_d_in = self.d_in
         if self.decoder_args.name == 'transformer':
             self.decoder = TransformerDecoder(
-                d_in=self.d_in,
+                d_in=decoder_d_in,
                 d_model=self.decoder_args.d_model,
                 d_context=self.decoder_args.d_context,
                 nhead=self.decoder_args.nhead,
@@ -136,7 +139,7 @@ class AutoregTreeGenOpt(pl.LightningModule):
             )
         elif self.decoder_args.name == 'gru':
             self.decoder = GRUDecoder(
-                d_in=self.d_in,
+                d_in=decoder_d_in,
                 d_model=self.decoder_args.d_model,
                 d_out=self.decoder_args.d_out,
                 dim_feedforward=self.decoder_args.dim_feedforward,
@@ -209,6 +212,14 @@ class AutoregTreeGenOpt(pl.LightningModule):
         tgt_in, tgt_out = tgt[:, :-1], tgt[:, 1:]
         tgt_padding_mask = training_utils.create_padding_mask(
             num_prog.cpu(), tgt_feat.size(1), batch_first=True)
+
+        if self.training_args.append_src_to_tgt:
+            src_feat = src[~src_padding_mask]
+            tgt_in = torch.cat(
+                (tgt_in, src_feat.unsqueeze(1).expand(-1, tgt_in.size(1), -1)), dim=-1)
+        elif self.training_args.add_src_to_tgt:
+            src_feat = src[~src_padding_mask]
+            tgt_in[:, 0] = tgt_in[:, 0] + src_feat
 
         # Classifier target, which is the original length of the output
         # features minus 1 (start from 0)
