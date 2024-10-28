@@ -12,11 +12,11 @@ from torch_geometric.utils import from_networkx, to_networkx
 
 def read_dataset(
     dataset_name: str, dataset_root: str, max_num_files: int = 1,
-    verbose: bool = True, prefix: str = "data"
+    index_start: int=0, verbose: bool = True, prefix: str = "data"
 ):
     data = []
     data_dir = os.path.join(dataset_root, dataset_name)
-    for i in range(max_num_files):
+    for i in range(index_start, index_start + max_num_files):
         data_path = os.path.join(data_dir, "{}.{}.pkl".format(prefix, i))
         if os.path.exists(data_path):
             with open(data_path, 'rb') as f:
