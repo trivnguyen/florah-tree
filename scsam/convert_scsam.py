@@ -8,7 +8,7 @@ import glob
 import sys
 from pathlib import Path
 
-sys.path.append('../')
+sys.path.append('/mnt/home/tnguyen/projects/florah/florah-tree')
 
 import numpy as np
 import networkx as nx
@@ -21,8 +21,7 @@ from torch_geometric.data import Data, Batch
 from absl import flags
 from ml_collections import config_dict, config_flags
 
-from florah_analysis import utils
-from analysis import analysis_utils
+import analysis
 
 
 # ConsistentTree settings for SC-SAM
@@ -48,6 +47,11 @@ def to_string(data, fmts, types):
     string += '\n'
     return string.format(*new_data)
 
+def read_snapshot_times(box_name):
+    """ Read in snapshot times from the simulations """
+    snapshot_times = np.genfromtxt(f"tables/{box_name}_redshifts.txt", delimiter=',', unpack=True)
+    return snapshot_times
+
 def convert_scsam(config: config_dict.ConfigDict):
     ''' Convert the trees to SC-SAM format '''
 
@@ -61,11 +65,11 @@ def convert_scsam(config: config_dict.ConfigDict):
     # check if data_path is directory or file
     data_path = os.path.join(config.data_root, config.data_name)
     if os.path.isdir(data_path):
-        print(f'Reading {config.num_max_files} files from {data_path}')
+        print(f'Reading {config.num_max_files} files from {data_path} starting from {config.start_file}')
         trees = []
         tree_paths = glob.glob(os.path.join(data_path, f'*.pkl'))
         tree_paths = sorted(tree_paths, key=lambda x: int(x.split('_')[-1].split('.')[0]))
-        for i in range(config.num_max_files):
+        for i in range(config.start_file, config.start_file + config.num_max_files):
             if os.path.exists(tree_paths[i]):
                 with open(tree_paths[i], 'rb') as f:
                     trees += pickle.load(f)
@@ -87,7 +91,7 @@ def convert_scsam(config: config_dict.ConfigDict):
         for itree in loop:
             loop.set_description(f'Converting to DFS order (tree {itree})')
             tree = trees[itree]
-            order = analysis_utils.dfs(tree.edge_index)
+            order = analysis.dfs(tree.edge_index)
 
             # convert edge_index to DFS orders
             old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(order)}
@@ -99,14 +103,18 @@ def convert_scsam(config: config_dict.ConfigDict):
             tree.edge_index = edge_index_dfs
 
     # get the snapshot times of the box
-    snaps, aexp_snaps, redshift_snaps = utils.read_snapshot_times(config.box_name)
+    snaps, aexp_snaps, redshift_snaps = read_snapshot_times(config.box_name)
+    print(f'Read {len(snaps)} snapshots from {config.box_name} box')
+    print(f'Snapshot times: {snaps}')
+    print(f'Snapshot redshifts: {redshift_snaps}')
+    print(f'Snapshot scale factors: {aexp_snaps}')
 
     # Start converting to ConsistentTree format
     # use PyG Batch to store all trees, very convenient for this application
+    print('Converting to ConsistentTree format ...')
     forest = Batch.from_data_list(trees)
 
     trees_data = {}
-
     trees_data['scale_factor'] = forest.x[:, 2].numpy()
 
     # assign snapshot number to each halo
@@ -142,6 +150,8 @@ def convert_scsam(config: config_dict.ConfigDict):
     ct_data = np.stack(ct_data, axis=1)
 
     # Write to file
+    print('Writing to file ...')
+
     num_trees_total = len(forest)
     num_trees_per_file = config.num_trees_per_file
     num_files = int(np.ceil(num_trees_total / num_trees_per_file))
