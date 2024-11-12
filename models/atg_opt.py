@@ -74,8 +74,9 @@ class AutoregTreeGenOpt(pl.LightningModule):
             'training_mode': 'all',
             'class_loss_weight': 1.0,
             'use_sample_weights': False,
-            'max_weight': 100,
+            'max_weight': 1,
             'use_desc_mass_ratio': False,
+            'use_prog_position': False,
             'append_src_to_tgt': False,
             'add_src_to_tgt': False,
         })
@@ -87,12 +88,14 @@ class AutoregTreeGenOpt(pl.LightningModule):
                 f'Training mode {self.training_mode} not supported')
         self.save_hyperparameters()
 
+        print('Traininng args: ', self.training_args)
+
         self._setup_model()
 
     def _setup_model(self):
 
         # create the transformer
-        d_time = 1
+        d_time = 1 + self.num_classes if self.training_args.use_prog_position else 1
         if self.encoder_args.name == 'transformer':
             self.encoder = TransformerEncoder(
                 d_in=self.d_in,
@@ -193,9 +196,11 @@ class AutoregTreeGenOpt(pl.LightningModule):
             max_split=self.num_classes,
             return_weights=self.training_args.use_sample_weights,
             use_desc_mass_ratio=self.training_args.use_desc_mass_ratio,
+            use_prog_position=self.training_args.use_prog_position,
         )
         # Processing Transformer input and time steps
-        src, src_t = src_feat[..., :-1], src_feat[..., -1:]
+        dim_t = 1 + self.num_classes if self.training_args.use_prog_position else 1
+        src, src_t = src_feat[..., :-dim_t], src_feat[..., -dim_t:]
         src_padding_mask = training_utils.create_padding_mask(
             src_len, src_feat.size(1), batch_first=True)
 

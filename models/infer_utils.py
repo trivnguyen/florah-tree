@@ -33,6 +33,7 @@ def generate_tree(
         tree: the generated tree
     """
     model.eval()
+    use_desc_mass_ratio = model.training_args.use_desc_mass_ratio
 
     device = device or model.device
     if not isinstance(x_root, torch.Tensor):
@@ -58,7 +59,6 @@ def generate_tree(
     x_root = (x_root - x_loc) / x_scale
     t_out = (t_out - t_loc) / t_scale
 
-
     # initialize the tree
     halo_t_index = [0]
     halo_index = [0]
@@ -67,6 +67,7 @@ def generate_tree(
     edge_index= [[], []]  # keep edge index as a list to make appending easier
     halo_feats = torch.stack([x_root], dim=0)
     time_feats = torch.stack([t_out[0]], dim=0)
+    prog_positions = torch.stack([torch.tensor([0, ], dtype=torch.float32, device=device)], dim=0)
 
     # start generating the tree
     while (len(halo_remain_index) > 0) & (n_max_iter > 0):
@@ -79,9 +80,17 @@ def generate_tree(
         # 0. get input sequence features and next time step
         path = training_utils.find_path_from_root(
             torch.tensor(edge_index, dtype=torch.long), halo_curr_index)
+
+        # Processing Transformer input and time steps
         src = halo_feats[path].unsqueeze(0)  # add batch dim
         src_t = t_out[:halo_curr_t_index+1].unsqueeze(0)  # add batch dim
         tgt_t = t_out[halo_curr_t_index + 1].unsqueeze(0) # add batch dim
+        if model.training_args.use_prog_position:
+            # if using progenitor positions
+            src_prog_pos = prog_positions[path].unsqueeze(0)
+            src_prog_pos = torch.nn.functional.one_hot(
+                src_prog_pos.long(), num_classes=model.num_classes).float()
+            src_t = torch.cat([src_t, src_prog_pos.squeeze(2)], dim=-1)
 
         # start generating the next halo
         # 1. pass the input sequence through the encoder
@@ -108,10 +117,23 @@ def generate_tree(
         # 3. create the progenitors using the decoder and the flows
         tgt_in = torch.zeros((1, n_prog+1, x_root.size(0)), device=device)
         for iprog in range(n_prog):
+            # add or append src features to the target input
+            if model.training_args.append_src_to_tgt:
+                src_feat = src[:, -1, :]
+                tgt_in_src = tgt_in.clone()
+                tgt_in_src = torch.cat(
+                    (tgt_in_src, src_feat.unsqueeze(1).expand(-1, tgt_in.size(1), -1)), dim=-1)
+            elif model.training_args.add_src_to_tgt:
+                src_feat = src[:, -1, :]
+                tgt_in_src = tgt_in.clone()
+                tgt_in_src[:, :, :] = src_feat
+            else:
+                tgt_in_src = tgt_in.clone()
+
             # pass the encoded sequence through the decoder
             if model.decoder_args.name == 'transformer':
                 x_dec = model.decoder(
-                    tgt_in[:, :-1],
+                    tgt_in_src[:, :-1],
                     memory=x_enc,
                     context=tgt_t,
                     tgt_padding_mask=None,
@@ -119,10 +141,11 @@ def generate_tree(
                 )
             elif model.decoder_args.name == 'gru':
                 x_dec = model.decoder(
-                    x=tgt_in,
-                    t=tgt_t.unsqueeze(1).expand(-1, tgt_in.size(1), -1),
+                    x=tgt_in_src,
+                    t=tgt_t.unsqueeze(1).expand(-1, tgt_in_src.size(1), -1),
                     lengths=torch.tensor([iprog+1, ], dtype=torch.long)
                 )
+
             # sample the next halo from the flows
             if model.concat_npe_context:
                 context_flows = torch.cat([
@@ -130,13 +153,20 @@ def generate_tree(
                     x_enc_reduced.unsqueeze(1).expand(1, x_dec.size(1), 1)
                 ], dim=-1)
             else:
-                context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
+                context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(
+                    -1, x_dec.size(1), -1)
             context_flows = context_flows[:, -1]
             tgt_in[:, iprog + 1] = model.npe.flow(model.npe(context_flows)).sample()
 
+        prog_feats = tgt_in[0, 1:]
+        if use_desc_mass_ratio:
+            prog_feats[:, 0] = prog_feats[:, 0] + src[:, -1, 0]
+
         # print(time_feats.shape, halo_feats.shape, n_prog, tgt_in.shape, tgt_t.shape)
-        halo_feats = torch.cat([halo_feats, tgt_in[0, 1:]], dim=0)
+        halo_feats = torch.cat([halo_feats, prog_feats], dim=0)
         time_feats = torch.cat([time_feats, tgt_t.repeat(n_prog, 1)], dim=0)
+        prog_positions = torch.cat(
+            [prog_positions, torch.arange(n_prog).unsqueeze(1)], dim=0)
 
         # create halo index for the progenitors
         prog_index = [next_halo_index + i for i in range(n_prog)]
@@ -158,116 +188,9 @@ def generate_tree(
     time_feats = time_feats * t_scale + t_loc
     return Data(
         x=torch.cat([halo_feats, time_feats], dim=1),
-        edge_index=torch.tensor(edge_index, dtype=torch.long)
+        edge_index=torch.tensor(edge_index, dtype=torch.long),
+        prog_positions=prog_positions
     )
-
-@torch.no_grad()
-def generate_mb_batch(
-    model,
-    x_root: torch.Tensor,
-    t_out: torch.Tensor,
-    norm_dict: Dict[str, Any],
-    device: torch.device,
-    verbose: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    device = device or model.device
-    model.eval()
-    model.to(device)
-    if not isinstance(x_root, torch.Tensor):
-        x_root = torch.tensor(x_root, device=device).float()
-    else:
-        x_root = x_root.to(device).float()
-    if not isinstance(t_out, torch.Tensor):
-        t_out = torch.tensor(t_out, device=device).float()
-    else:
-        t_out = t_out.to(device).float()
-
-    # normalizing data
-    if norm_dict is not None:
-        x_loc = torch.tensor(norm_dict['x_loc'], dtype=torch.float32, device=device)
-        x_scale = torch.tensor(norm_dict['x_scale'], dtype=torch.float32, device=device)
-        t_loc = torch.tensor(norm_dict['t_loc'], dtype=torch.float32, device=device)
-        t_scale = torch.tensor(norm_dict['t_scale'], dtype=torch.float32, device=device)
-    else:
-        x_loc = torch.zeros(x_root.size(0), device=device)
-        x_scale = torch.ones(x_root.size(0), device=device)
-        t_loc = torch.zeros(1, device=device)
-        t_scale = torch.ones(1, device=device)
-    x_root = (x_root - x_loc) / x_scale
-    t_out = (t_out - t_loc) / t_scale
-
-    n_t = t_out.size(1)
-    halo_feats = torch.zeros(
-        (x_root.size(0), n_t, x_root.size(1)), dtype=torch.float32, device=device)
-    halo_feats[:, 0] = x_root
-    class_output = torch.zeros(
-        (x_root.size(0), n_t, model.num_classes), dtype=torch.float32, device=device)
-
-    for i in range(n_t-1):
-        src = halo_feats[:, :i + 1]
-        tgt_t = t_out[:, i + 1]
-        if model.concat_time:
-            src_t = torch.cat([t_out[:, :i + 1], t_out[:, 1:i+2]], dim=-1)
-        else:
-            src_t = t_out[:, :i + 1]
-
-        # pss the source sequence through the encoder
-        if model.encoder_args.name == 'transformer':
-            x_enc = model.encoder(src, src_t, src_padding_mask=None)
-            x_enc_reduced = models_utils.summarize_features(
-                x_enc, reduction='last', padding_mask=None)
-        elif model.encoder_args.name == 'gru':
-            x_enc = model.encoder(
-                src,
-                src_t,
-                lengths=torch.tensor([i + 1, ], dtype=torch.long).expand(src.size(0))
-            )
-            x_enc_reduced = models_utils.summarize_features(
-                x_enc, reduction='last', padding_mask=None)
-
-        # pass the encoded sequence through the decoder
-        if model.use_sos_embedding:
-            tgt_in = model.sos_embedding(x_enc_reduced).unsqueeze(1)
-        else:
-            tgt_in = torch.zeros((x_root.size(0), 1, x_root.size(1)), device=device)
-
-        if model.decoder_args.name == 'transformer':
-            x_dec = model.decoder(
-                tgt_in,
-                memory=x_enc_reduced.unsqueeze(1),
-                context=tgt_t,
-                tgt_padding_mask=None,
-                memory_padding_mask=None
-            )
-        elif model.decoder_args.name == 'gru':
-            x_dec = model.decoder(
-                x=tgt_in,
-                t=tgt_t.unsqueeze(1).expand(-1, tgt_in.size(1), -1),
-                lengths=torch.ones((1, ), dtype=torch.long)
-            )
-        # sample the next halo from the flows
-        if model.concat_npe_context:
-            context_flows = torch.cat([
-                x_dec,
-                x_enc_reduced.unsqueeze(1).expand(1, x_dec.size(1), 1)
-            ], dim=-1)
-        else:
-            context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
-        context_flows = context_flows[:, -1]
-        halo_feats[:, i+1] = model.npe.flow(model.npe(context_flows)).sample()
-
-        # calculate and return x class
-        x_class = x_enc_reduced + model.classifier_context_embed(tgt_t)
-        x_class = model.classifier(x_class)
-        class_output[:, i+1] += x_class
-
-    # unnormalize the features
-    halo_feats = halo_feats * x_scale + x_loc
-    t_out = t_out * t_scale + t_loc
-    halo_feats = torch.cat([halo_feats, t_out], dim=-1)
-
-    return halo_feats, class_output
-
 
 def generate_forest(
     model,
@@ -314,3 +237,119 @@ def generate_forest(
         print(f'Time elapsed: {time_end - time_start:.2f} s')
 
     return tree_list
+
+
+@torch.no_grad()
+def generate_mb_batch(
+    model,
+    x_root: torch.Tensor,
+    t_out: torch.Tensor,
+    norm_dict: Dict[str, Any],
+    device: torch.device,
+    verbose: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+
+    device = device or model.device
+    model.eval()
+    model.to(device)
+    use_desc_mass_ratio = model.training_args.use_desc_mass_ratio
+
+    if not isinstance(x_root, torch.Tensor):
+        x_root = torch.tensor(x_root, device=device).float()
+    else:
+        x_root = x_root.to(device).float()
+    if not isinstance(t_out, torch.Tensor):
+        t_out = torch.tensor(t_out, device=device).float()
+    else:
+        t_out = t_out.to(device).float()
+
+    # normalizing data
+    if norm_dict is not None:
+        x_loc = torch.tensor(norm_dict['x_loc'], dtype=torch.float32, device=device)
+        x_scale = torch.tensor(norm_dict['x_scale'], dtype=torch.float32, device=device)
+        t_loc = torch.tensor(norm_dict['t_loc'], dtype=torch.float32, device=device)
+        t_scale = torch.tensor(norm_dict['t_scale'], dtype=torch.float32, device=device)
+    else:
+        x_loc = torch.zeros(x_root.size(0), device=device)
+        x_scale = torch.ones(x_root.size(0), device=device)
+        t_loc = torch.zeros(1, device=device)
+        t_scale = torch.ones(1, device=device)
+    x_root = (x_root - x_loc) / x_scale
+    t_out = (t_out - t_loc) / t_scale
+
+    n_t = t_out.size(1)
+    halo_feats = torch.zeros(
+        (x_root.size(0), n_t, x_root.size(1)), dtype=torch.float32, device=device)
+    halo_feats[:, 0] = x_root
+    class_output = torch.zeros(
+        (x_root.size(0), n_t, model.num_classes), dtype=torch.float32, device=device)
+
+    for i in range(n_t-1):
+        src = halo_feats[:, :i + 1]
+        tgt_t = t_out[:, i + 1]
+        # if model.concat_time:
+            # src_t = torch.cat([t_out[:, :i + 1], t_out[:, 1:i+2]], dim=-1)
+        # else:
+        src_t = t_out[:, :i + 1]
+
+        # pss the source sequence through the encoder
+        if model.encoder_args.name == 'transformer':
+            x_enc = model.encoder(src, src_t, src_padding_mask=None)
+            x_enc_reduced = models_utils.summarize_features(
+                x_enc, reduction='last', padding_mask=None)
+        elif model.encoder_args.name == 'gru':
+            x_enc = model.encoder(
+                src,
+                src_t,
+                lengths=torch.tensor([i + 1, ], dtype=torch.long).expand(src.size(0))
+            )
+            x_enc_reduced = models_utils.summarize_features(
+                x_enc, reduction='last', padding_mask=None)
+
+        # pass the encoded sequence through the decoder
+        if model.use_sos_embedding:
+            tgt_in = model.sos_embedding(x_enc_reduced).unsqueeze(1)
+        else:
+            tgt_in = torch.zeros((x_root.size(0), 1, x_root.size(1)), device=device)
+
+        if model.decoder_args.name == 'transformer':
+            x_dec = model.decoder(
+                tgt_in,
+                memory=x_enc_reduced.unsqueeze(1),
+                context=tgt_t,
+                tgt_padding_mask=None,
+                memory_padding_mask=None
+            )
+        elif model.decoder_args.name == 'gru':
+            x_dec = model.decoder(
+                x=tgt_in,
+                t=tgt_t.unsqueeze(1).expand(-1, tgt_in.size(1), -1),
+                lengths=torch.ones((1, ), dtype=torch.long)
+            )
+        # sample the next halo from the flows
+        if model.concat_npe_context:
+            context_flows = torch.cat([
+                x_dec,
+                x_enc_reduced.unsqueeze(1).expand(1, x_dec.size(1), 1)
+            ], dim=-1)
+        else:
+            context_flows = x_dec + x_enc_reduced.unsqueeze(1).expand(-1, x_dec.size(1), -1)
+        context_flows = context_flows[:, -1]
+
+        prog_feat = model.npe.flow(context_flows).sample()
+        if use_desc_mass_ratio:
+            prog_feat[:, 0] = prog_feat[:, 0] + halo_feats[:, i, 0]
+        halo_feats[:, i+1] = prog_feat
+
+        # calculate and return x class
+        x_class = x_enc_reduced + model.classifier_context_embed(tgt_t)
+        x_class = model.classifier(x_class)
+        class_output[:, i+1] += x_class
+
+    # unnormalize the features
+    halo_feats = halo_feats * x_scale + x_loc
+    t_out = t_out * t_scale + t_loc
+    halo_feats = torch.cat([halo_feats, t_out], dim=-1)
+
+    return halo_feats, class_output
+

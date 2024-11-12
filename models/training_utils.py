@@ -143,7 +143,7 @@ def prepare_batch(batch, num_samples_per_graph=1, return_weights=False, all_node
     return (padded_features, lengths, padded_out_features, out_lengths, weights)
 
 def prepare_batch_branch(
-    batch, max_split, return_weights=False, all_nodes=False, use_desc_mass_ratio=False):
+    batch, max_split, return_weights=False, all_nodes=False, use_desc_mass_ratio=False, use_prog_position=False):
     """ Prepare a batch for training.
 
     Parameters
@@ -159,6 +159,8 @@ def prepare_batch_branch(
     use_desc_mass_ratio: bool
         If True, out_features is a ratio of the descendants of the selected node.
         Assuming that index of the mass feature is 0.
+    use_prog_position: bool
+        If True, concatenate the position of the progenitors to the input time features.
     """
     features = []
     out_features = []
@@ -178,7 +180,14 @@ def prepare_batch_branch(
             num_prog = torch.sum(adj[path], axis=1, dtype=torch.long)
             max_num_prog_batch = max(max_num_prog_batch, num_prog.max().item())
 
-            features.append(graph.x[path])
+            if use_prog_position:
+                feat_x = graph.x[path]
+                feat_prog_pos = torch.nn.functional.one_hot(
+                    graph.prog_pos[path].long(), num_classes=max_split).float()
+                feat = torch.cat((feat_x, feat_prog_pos), dim=1)
+            else:
+                feat = graph.x[path]
+            features.append(feat)
             num_progenitors.append(num_prog)
 
             out = torch.zeros((len(path), max_split, graph.x.size(1)), device=graph.x.device)
