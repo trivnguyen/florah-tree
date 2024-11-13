@@ -67,11 +67,11 @@ def convert_scsam(config: config_dict.ConfigDict):
     if os.path.isdir(data_path):
         print(f'Reading {config.num_max_files} files from {data_path} starting from {config.start_file}')
         trees = []
-        tree_paths = glob.glob(os.path.join(data_path, f'*.pkl'))
-        tree_paths = sorted(tree_paths, key=lambda x: int(x.split('_')[-1].split('.')[0]))
         for i in range(config.start_file, config.start_file + config.num_max_files):
-            if os.path.exists(tree_paths[i]):
-                with open(tree_paths[i], 'rb') as f:
+            tree_path = os.path.join(data_path, f'{config.prefix}.{i}.pkl')
+            if os.path.exists(tree_path):
+                print('Reading', tree_path)
+                with open(tree_path, 'rb') as f:
                     trees += pickle.load(f)
     else:
         with open(data_path, 'rb') as f:
