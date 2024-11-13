@@ -9,6 +9,53 @@ from tqdm import tqdm
 
 from models import training_utils, models_utils
 
+def check_mass_sort(tree):
+    """ Check if the mass is sorted correctly within the tree """
+    halo_idx, num_progs = torch.unique(tree.edge_index[0], return_counts=True)
+
+    is_sorted = True
+    for idx in halo_idx:
+        progs_idx = tree.edge_index[1][tree.edge_index[0] == idx]
+        progs_x = tree.x[progs_idx]
+
+        # Check if progs_x[:, 0] is sorted in descending order
+        is_sorted_prog = torch.all(progs_x[:, 0][:-1] >= progs_x[:, 0][1:])
+        is_sorted = is_sorted & is_sorted_prog
+        if not is_sorted_prog:
+            print(f"Halo {idx} is not sorted correctly")
+            print(tree.x[idx], progs_x, progs_idx)
+    return is_sorted
+
+def sort_tree(tree, sort_prop=0):
+    def _sort_tree(tree, root_index=0):
+        """ Sort the tree in a depth-first order """
+        ordered_index = [root_index, ]
+        prog_indices = tree.edge_index[1, tree.edge_index[0] == root_index]
+        if len(prog_indices) == 0:
+            return ordered_index
+        prog_indices = prog_indices[
+            torch.argsort(tree.x[prog_indices, sort_prop], descending=True)]
+        for prog_index in prog_indices:
+            ordered_index.extend(_sort_tree(tree, prog_index))
+        return ordered_index
+
+    ordered_index = _sort_tree(tree, torch.tensor(0, device=tree.x.device))
+    ordered_index = torch.tensor(ordered_index, device=tree.x.device)
+    ordered_index_list = ordered_index.tolist()
+
+    new_tree = tree.clone()
+    for key, value in tree.items():
+        if key not in ['edge_index']:
+            new_tree[key] = value[ordered_index]
+    new_tree.edge_index = torch.stack([
+        torch.tensor([ordered_index_list.index(i.item()) for i in tree.edge_index[0]]),
+        torch.tensor([ordered_index_list.index(i.item()) for i in tree.edge_index[1]])
+    ])
+    perm = torch.argsort(new_tree.edge_index[1])
+    new_tree.edge_index = new_tree.edge_index[:, perm]
+
+    return new_tree
+
 @torch.no_grad()
 def generate_tree(
     model,
@@ -16,7 +63,7 @@ def generate_tree(
     t_out: torch.Tensor,
     norm_dict: Optional[Dict[str, torch.Tensor]] = None,
     n_max_iter: int = 1000,
-    device: Optional[torch.device] = None
+    device: Optional[torch.device] = None,
 ):
     """
     Autoregressively generate a tree from the root node.
@@ -68,6 +115,7 @@ def generate_tree(
     halo_feats = torch.stack([x_root], dim=0)
     time_feats = torch.stack([t_out[0]], dim=0)
     prog_positions = torch.stack([torch.tensor([0, ], dtype=torch.float32, device=device)], dim=0)
+    snap_indices = [0]
 
     # start generating the tree
     while (len(halo_remain_index) > 0) & (n_max_iter > 0):
@@ -167,6 +215,7 @@ def generate_tree(
         time_feats = torch.cat([time_feats, tgt_t.repeat(n_prog, 1)], dim=0)
         prog_positions = torch.cat(
             [prog_positions, torch.arange(n_prog).unsqueeze(1)], dim=0)
+        snap_indices.extend([halo_curr_t_index + 1] * n_prog)
 
         # create halo index for the progenitors
         prog_index = [next_halo_index + i for i in range(n_prog)]
@@ -189,7 +238,8 @@ def generate_tree(
     return Data(
         x=torch.cat([halo_feats, time_feats], dim=1),
         edge_index=torch.tensor(edge_index, dtype=torch.long),
-        prog_positions=prog_positions
+        prog_positions=prog_positions,
+        snap_indices=torch.tensor(snap_indices, dtype=torch.long),
     )
 
 def generate_forest(
@@ -199,6 +249,8 @@ def generate_forest(
     norm_dict: Optional[Dict[str, torch.Tensor]] = None,
     n_max_iter: int = 1000,
     device: Optional[torch.device] = None,
+    snapshot_list: Optional[List[int]] = None,
+    sort: bool = False,
     verbose: bool = False
 ):
     """ Generate multiple trees
@@ -230,6 +282,10 @@ def generate_forest(
             n_max_iter=n_max_iter,
             device=device
         )
+        if snapshot_list is not None:
+            tree.snap = snapshot_list[i][tree.snap_indices]
+        if sort:
+            tree = sort_tree(tree)
         # always return a CPU tensor for memory efficiency
         tree_list.append(tree.cpu())
     time_end = time.time()
