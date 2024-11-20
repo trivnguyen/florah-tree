@@ -13,33 +13,18 @@ import yaml
 from absl import flags, logging
 from ml_collections import config_flags
 from models import utils
-from models.atg_opt import AutoregTreeGenOpt
+from models.atg import AutoregTreeGen
 
 logging.set_verbosity(logging.INFO)
 
 def train(
     config: ml_collections.ConfigDict, workdir: str = "./logging/"
 ):
-    # set up work directory
-    if not hasattr(config, "name"):
-        name = utils.get_random_name()
-    else:
-        name = config["name"]
-    logging.info("Starting training run {} at {}".format(name, workdir))
-
-    workdir = os.path.join(workdir, name)
+    workdir = './debug'
     checkpoint_path = None
+    logging.info("Debugging run at {}".format(workdir))
     if os.path.exists(workdir):
-        if config.overwrite:
-            shutil.rmtree(workdir)
-        elif config.get('checkpoint', None) is not None:
-            checkpoint_path = os.path.join(
-                workdir, 'lightning_logs/checkpoints', config.checkpoint)
-        else:
-            raise ValueError(
-                f"Workdir {workdir} already exists. Please set overwrite=True "
-                "to overwrite the existing directory.")
-
+        shutil.rmtree(workdir)
     os.makedirs(workdir, exist_ok=True)
 
     # Save the configuration to a YAML file
@@ -50,12 +35,14 @@ def train(
 
     # load dataset and prepare dataloader
     logging.info("Preparing dataloader...")
+    data = datasets.read_dataset(
+        dataset_root=config.data.root,
+        dataset_name=config.data.name,
+        max_num_files=config.data.get("num_files", 1),
+    )
+    data = data[:1000]
     train_loader, val_loader, norm_dict = datasets.prepare_dataloader(
-        datasets.read_dataset(
-            dataset_root=config.data.root,
-            dataset_name=config.data.name,
-            max_num_files=config.data.get("num_files", 1),
-        ),
+        data,
         train_frac=config.data.train_frac,
         train_batch_size=config.training.train_batch_size,
         eval_batch_size=config.training.eval_batch_size,
@@ -67,7 +54,7 @@ def train(
 
     # create the model
     logging.info("Creating model...")
-    model_atg = AutoregTreeGenOpt(
+    model_atg = AutoregTreeGen(
         d_in=config.model.d_in,
         num_classes=config.model.num_classes,
         encoder_args=config.model.encoder,
@@ -78,8 +65,6 @@ def train(
         scheduler_args=config.scheduler,
         training_args=config.training,
         norm_dict=norm_dict,
-        concat_npe_context=config.model.concat_npe_context,
-        use_sos_embedding=config.model.use_sos_embedding,
     )
 
     # Create call backs and trainer objects
@@ -117,7 +102,7 @@ def train(
         callbacks=callbacks,
         logger=train_logger,
         gradient_clip_val=config.training.get('gradient_clip_val', 0),
-        enable_progress_bar=config.get("enable_progress_bar", True),
+        enable_progress_bar=True,
         num_sanity_val_steps=0,
         # log_every_n_steps=config.training.log_every_n_steps,
         # val_check_interval=config.training.val_check_interval,
@@ -131,7 +116,7 @@ def train(
         model_atg,
         train_dataloaders=train_loader,
         val_dataloaders=val_loader,
-        ckpt_path=checkpoint_path,
+        ckpt_path=None,
     )
 
     # Done
