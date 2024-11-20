@@ -28,7 +28,7 @@ def find_ancestor_indices(edge_index, node):
     ancestors = edge_index[1][ancestor_indices]
 
     return ancestors
-    
+
 def pad_sequences(sequences, max_len=None, padding_value=0):
     if max_len is None:
         max_len = max(len(seq) for seq in sequences)
@@ -73,7 +73,9 @@ def get_leaves(data):
     return leaf_nodes
 
 def prepare_batch_branch(
-    batch, max_split, return_weights=False, all_nodes=False, use_desc_mass_ratio=False, use_prog_position=False):
+    batch, max_split, return_weights=False, use_desc_mass_ratio=False,
+    use_prog_position=False
+):
     """ Prepare a batch for training.
 
     Parameters
@@ -84,8 +86,6 @@ def prepare_batch_branch(
         The maximum number of progenitors to consider.
     return_weights : bool
         Whether to return the sample weights.
-    all_nodes : bool
-        If True, take all nodes instead of sampling. Overrides num_samples_per_graph.
     use_desc_mass_ratio: bool
         If True, out_features is a ratio of the descendants of the selected node.
         Assuming that index of the mass feature is 0.
@@ -125,7 +125,7 @@ def prepare_batch_branch(
                 temp = graph.x[adj[node].eq(1)]
                 if use_desc_mass_ratio:
                     temp[:, 0] = temp[:, 0] - graph.x[node, 0]
-                out[i][:num_prog[i]] += temp
+                out[i][:num_prog[i]] += temp[:max_split]
             out_features.append(out)
 
             if return_weights:

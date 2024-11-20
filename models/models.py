@@ -31,7 +31,7 @@ class MLP(nn.Module):
         x = self.layers[-1](x)
         return x
 
-class GRUDecoder(nn.Module):
+class GRU(nn.Module):
     """
     GRU model with a variable number of hidden layers.
 
@@ -90,15 +90,21 @@ class GRUDecoder(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        t: torch.Tensor,
-        lengths: torch.Tensor,
+        t: torch.Tensor = None,
+        padding_mask: torch.Tensor = None,
         return_hidden_states: bool = False
     ) -> torch.Tensor:
-        # project x and t
-        if self.concat:
-            x = torch.cat([self.linear_x_proj(x), self.linear_t_proj(t)], dim=-1)
+        # project the input and time before passing through the GRU
+        if t is not None:
+            if self.concat:
+                x = torch.cat([self.linear_x_proj(x), self.linear_t_proj(t)], dim=-1)
+            else:
+                x = self.linear_x_proj(x) + self.linear_t_proj(t)
         else:
-            x = self.linear_x_proj(x) + self.linear_t_proj(t)
+            x = self.linear_x_proj(x)
+
+        # pack the sequence and pass through the GRU
+        lengths = padding_mask.eq(0).sum(-1).cpu() if padding_mask else x.size(1)
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, lengths, batch_first=True, enforce_sorted=False)
         x, hout = self.gru_layers(x)
