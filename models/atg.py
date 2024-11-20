@@ -75,8 +75,6 @@ class AutoregTreeGen(pl.LightningModule):
                 f'Training mode {self.training_mode} not supported')
         self.save_hyperparameters()
 
-        print('Traininng args: ', self.training_args)
-
         self._setup_model()
 
     def _setup_model(self):
@@ -89,7 +87,7 @@ class AutoregTreeGen(pl.LightningModule):
                 nhead=self.encoder_args.nhead,
                 dim_feedforward=self.encoder_args.dim_feedforward,
                 num_layers=self.encoder_args.num_layers,
-                d_time=d_time,
+                d_time=1,
                 emb_size=self.encoder_args.emb_size,
                 emb_dropout=self.encoder_args.emb_dropout,
                 concat=self.encoder_args.concat
@@ -101,7 +99,7 @@ class AutoregTreeGen(pl.LightningModule):
                 d_out=self.encoder_args.d_out,
                 dim_feedforward=self.encoder_args.dim_feedforward,
                 num_layers=self.encoder_args.num_layers,
-                d_time=d_time,
+                d_time=1,
                 activation_fn=nn.ReLU(),
                 concat=self.encoder_args.concat,
             )
@@ -137,6 +135,8 @@ class AutoregTreeGen(pl.LightningModule):
                 f'Decoder {self.decoder_args.name} not implemented')
 
         # create the NPE
+        self.npe_context_embed = nn.Linear(
+            self.num_classes, self.decoder_args.d_model)
         self.npe = flows.NPE(
             input_size=self.d_in,
             context_size=self.decoder_args.d_model,
@@ -156,11 +156,11 @@ class AutoregTreeGen(pl.LightningModule):
 
     def _prepare_batch(self, batch):
         """ Prepare the batch for training. """
-        src_feat, tgt_feat, num_prog, src_len, weights  = training_utils.prepare_batch_branch(
+        src_feat, tgt_feat, num_prog, src_len, _ = training_utils.prepare_batch_branch(
             batch, self.num_classes,
-            return_weights=self.training_args.use_sample_weight,
             use_desc_mass_ratio=self.training_args.use_desc_mass_ratio,
             use_prog_position=False,
+            return_weights=False,
         )
         # Processing Transformer input and time steps
         src, src_t = src_feat[..., :-1], src_feat[..., -1:]
@@ -184,9 +184,8 @@ class AutoregTreeGen(pl.LightningModule):
         # Classifier target, which is the original length of the output
         # features minus 1 (start from 0)
         class_target = num_prog - 1
-
-        # Processing weights
-        weights = torch.clamp(weights, min=None, max=self.training_args.max_weight)
+        class_target_onehot = torch.nn.functional.one_hot(
+            class_target, self.num_classes).float()
 
         # Move to the same device as the model
         src = src.to(self.device)
@@ -197,7 +196,7 @@ class AutoregTreeGen(pl.LightningModule):
         src_padding_mask = src_padding_mask.to(self.device)
         tgt_padding_mask = tgt_padding_mask.to(self.device)
         class_target = class_target.to(self.device)
-        weights = weights.to(self.device)
+        class_target_onehot = class_target_onehot.to(self.device)
 
         # return a dictionary of the inputs
         return {
@@ -209,9 +208,9 @@ class AutoregTreeGen(pl.LightningModule):
             'src_padding_mask': src_padding_mask,
             'tgt_padding_mask': tgt_padding_mask,
             'class_target': class_target,
+            'class_target_onehot': class_target_onehot,
             'batch_size': src.size(0),
             'src_len': src_len,
-            'weights': weights
         }
 
     def forward(
@@ -242,7 +241,7 @@ class AutoregTreeGen(pl.LightningModule):
         if self.decoder_args.name == 'transformer':
             x_dec = self.decoder(
                 tgt_in,
-                memory=x_enc_reduced.unsqueeze(1),
+                memory=x_enc.unsqueeze(1),
                 context=tgt_t,
                 tgt_padding_mask=tgt_padding_mask,
                 memory_padding_mask=None
@@ -254,24 +253,19 @@ class AutoregTreeGen(pl.LightningModule):
                 padding_mask=tgt_padding_mask
             )
 
-        # 3. create the flows context
-        context_flows = x_dec + x_enc.unsqueeze(1).expand(-1, x_dec.size(1), -1)
-
-        # 4. pass the encoded features through the classifier
+        # 3. pass the encoded features through the classifier
         # add the output time steps to the encoded features
         x_class = x_enc + self.classifier_context_embed(tgt_t)
         x_class = self.classifier(x_class)
 
-        return context_flows, x_class
+        return x_enc, x_dec, x_class
 
     def training_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
         batch_size = batch_dict['batch_size']
-        weights = batch_dict['weights'] / batch_dict['weights'].sum()
-        weights = torch.ones_like(weights) / batch_size
 
         # forward pass
-        context_flows, x_class = self.forward(
+        x_enc, x_dec, x_class = self.forward(
             src=batch_dict['src'],
             src_t=batch_dict['src_t'],
             tgt_in=batch_dict['tgt_in'],
@@ -282,14 +276,13 @@ class AutoregTreeGen(pl.LightningModule):
 
         # compute the flow loss
         if self.training_args.training_mode in ('all', 'npe'):
-            lp = self.npe.log_prob(batch_dict['tgt_out'], context=context_flows)
+            context = self.npe_context_embed(batch_dict['class_target_onehot'])
+            context = context.unsqueeze(1).expand_as(x_dec)
+            context = context + x_dec + x_enc.unsqueeze(1).expand_as(x_dec)
+
+            lp = self.npe.log_prob(batch_dict['tgt_out'], context=context)
             lp = lp * batch_dict['tgt_padding_mask'].eq(0).float()
             flows_loss = -lp.mean()
-            # if self.training_args.old_flows_loss:
-                # lp = torch.sum(lp) / batch_dict['tgt_padding_mask'].eq(0).sum()
-            # else:
-                # lp = torch.sum(torch.sum(lp, -1) * weights)
-            # flows_loss = -lp
         else:
             flows_loss = 0
 
@@ -325,11 +318,9 @@ class AutoregTreeGen(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
         batch_size = batch_dict['batch_size']
-        weights = batch_dict['weights'] / batch_dict['weights'].sum()
-        weights = torch.ones_like(weights) / batch_size
 
         # forward pass
-        context_flows, x_class = self.forward(
+        x_enc, x_dec, x_class = self.forward(
             src=batch_dict['src'],
             src_t=batch_dict['src_t'],
             tgt_in=batch_dict['tgt_in'],
@@ -339,14 +330,12 @@ class AutoregTreeGen(pl.LightningModule):
         )
         # compute the flow loss
         if self.training_args.training_mode in ('all', 'npe'):
-            lp = self.npe.log_prob(batch_dict['tgt_out'], context=context_flows)
+            context = self.npe_context_embed(batch_dict['class_target_onehot'])
+            context = context.unsqueeze(1).expand_as(x_dec)
+            context = context + x_dec + x_enc.unsqueeze(1).expand_as(x_dec)
+            lp = self.npe.log_prob(batch_dict['tgt_out'], context=context)
             lp = lp * batch_dict['tgt_padding_mask'].eq(0).float()
             flows_loss = -lp.mean()
-            # if self.training_args.old_flows_loss:
-                # lp = torch.sum(lp) / batch_dict['tgt_padding_mask'].eq(0).sum()
-            # else:
-                # lp = torch.sum(torch.sum(lp, -1) * weights)
-            # flows_loss = -lp
         else:
             flows_loss = 0
 

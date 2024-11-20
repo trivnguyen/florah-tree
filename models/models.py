@@ -104,7 +104,12 @@ class GRU(nn.Module):
             x = self.linear_x_proj(x)
 
         # pack the sequence and pass through the GRU
-        lengths = padding_mask.eq(0).sum(-1).cpu() if padding_mask else x.size(1)
+        if padding_mask is not None:
+            lengths = padding_mask.eq(0).sum(-1).cpu()
+        else:
+            lengths = torch.tensor([x.size(1), ], dtype=torch.long)
+            lengths = lengths.repeat(x.size(0))
+
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, lengths, batch_first=True, enforce_sorted=False)
         x, hout = self.gru_layers(x)
