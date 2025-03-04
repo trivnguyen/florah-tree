@@ -1,5 +1,4 @@
 
-
 import os
 import h5py
 import pickle
@@ -11,6 +10,7 @@ from pathlib import Path
 sys.path.append('/mnt/home/tnguyen/projects/florah/florah-tree')
 
 import numpy as np
+import pandas as pd
 import networkx as nx
 import torch
 import torch.nn as nn
@@ -21,7 +21,7 @@ from torch_geometric.data import Data, Batch
 from absl import flags
 from ml_collections import config_dict, config_flags
 
-import analysis
+from models import analysis_utils as analysis
 
 
 # ConsistentTree settings for SC-SAM
@@ -51,6 +51,10 @@ def read_snapshot_times(box_name):
     """ Read in snapshot times from the simulations """
     snapshot_times = np.genfromtxt(f"tables/{box_name}_redshifts.txt", delimiter=',', unpack=True)
     return snapshot_times
+
+def read_metadata(box_name):
+    meta_table = pd.read_csv('tables/meta.csv')
+    return meta_table[meta_table['name'] == box_name.upper()]
 
 def convert_scsam(config: config_dict.ConfigDict):
     ''' Convert the trees to SC-SAM format '''
@@ -86,21 +90,55 @@ def convert_scsam(config: config_dict.ConfigDict):
     trees = trees[:config.num_max_trees]
 
     # convert all trees to depth-first search order
-    if not config.is_dfs:
-        loop = tqdm(range(len(trees)))
-        for itree in loop:
-            loop.set_description(f'Converting to DFS order (tree {itree})')
-            tree = trees[itree]
-            order = analysis.dfs(tree.edge_index)
+    # apply some mass cut for both simulation and generated data
+    meta_table = read_metadata(config.box_name)
+    min_mhalo = meta_table['Mdm'].values[0] * config.num_min_dm
+    min_logmhalo = np.log10(min_mhalo)
 
-            # convert edge_index to DFS orders
-            old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(order)}
-            edge_index_dfs = torch.tensor(
-                [old_to_new[node.item()] for node in tree.edge_index.view(-1)])
-            edge_index_dfs = edge_index_dfs.view(2, -1)
+    def sort_tree(tree, min_logm):
+        def _sort_tree(index):
+            ordered_index = [index, ]
+            prog_indices = tree.edge_index[1, tree.edge_index[0] == index]
+            if len(prog_indices) == 0:
+                return ordered_index
+            prog_logm = tree.x[prog_indices, 0]
 
-            tree.x = tree.x[order]
-            tree.edge_index = edge_index_dfs
+            # sort progenitors by mass
+            order = prog_logm.argsort(descending=True)
+            sorted_prog_indices = prog_indices[order]
+            sorted_prog_logm = prog_logm[order]
+            for i in range(len(sorted_prog_indices)):
+                if sorted_prog_logm[i] > min_logm:
+                    ordered_index.extend(_sort_tree(sorted_prog_indices[i]))
+            return ordered_index
+
+        ordered_index = _sort_tree(torch.tensor(0, device=tree.x.device))
+        ordered_index = torch.tensor(ordered_index, device=tree.x.device)
+        ordered_index = ordered_index.tolist()
+
+        new_tree = tree.clone()
+        for key, value in tree.items():
+            if key not in ['edge_index']:
+                new_tree[key] = value[ordered_index]
+
+        edge_index = [[], []]
+        for i in range(len(tree.edge_index[0])):
+            e1 = tree.edge_index[0, i].item()
+            e2 = tree.edge_index[1, i].item()
+            if e1 not in ordered_index or e2 not in ordered_index:
+                continue
+            edge_index[0].append(ordered_index.index(e1))
+            edge_index[1].append(ordered_index.index(e2))
+        new_tree.edge_index = torch.tensor(
+            edge_index, device=tree.edge_index.device, dtype=torch.long)
+        perm = torch.argsort(new_tree.edge_index[1])
+        new_tree.edge_index = new_tree.edge_index[:, perm]
+        return new_tree
+
+    loop = tqdm(range(len(trees)))
+    for itree in loop:
+        loop.set_description(f'Converting to DFS order (tree {itree})')
+        trees[itree] = sort_tree(trees[itree], min_logmhalo)
 
     # get the snapshot times of the box
     snaps, aexp_snaps, redshift_snaps = read_snapshot_times(config.box_name)
