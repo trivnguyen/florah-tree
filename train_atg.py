@@ -33,8 +33,11 @@ def train(
         if config.overwrite:
             shutil.rmtree(workdir)
         elif config.get('checkpoint', None) is not None:
-            checkpoint_path = os.path.join(
-                workdir, 'lightning_logs/checkpoints', config.checkpoint)
+            if not os.path.isabs(config.checkpoint):
+                checkpoint_path = os.path.join(
+                    workdir, 'lightning_logs/checkpoints', config.checkpoint)
+            else:
+                checkpoint_path = config.checkpoint
         else:
             raise ValueError(
                 f"Workdir {workdir} already exists. Please set overwrite=True "
@@ -128,7 +131,6 @@ def train(
         val_dataloaders=val_loader,
         ckpt_path=checkpoint_path,
     )
-
     # Done
     logging.info("Done!")
 
