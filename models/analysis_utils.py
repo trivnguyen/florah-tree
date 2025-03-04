@@ -120,6 +120,7 @@ def get_main_branch(mass, edge_index):
 
     return main_branch_index
 
+
 def subsample_trees(
     halo_ids, halo_desc_ids, node_feats, snap_nums, new_snap_nums):
     """ Subsample the trees to only include the snapshots in new_snap_nums.
@@ -132,6 +133,8 @@ def subsample_trees(
             new_node_feats.append(node_feats[i])
             new_halo_ids.append(halo_ids[i])
             new_halo_desc_ids.append(halo_desc_ids[i])
+    if len(new_node_feats) == 0:
+        return new_node_feats, new_halo_ids, new_halo_desc_ids
     new_node_feats = np.stack(new_node_feats, axis=0)
     new_halo_ids = np.array(new_halo_ids)
     new_halo_desc_ids = np.array(new_halo_desc_ids)
@@ -149,56 +152,71 @@ def subsample_trees(
 
     return new_halo_ids, new_halo_desc_ids, new_node_feats
 
-def remove_anc(halo_ids, halo_desc_ids, halo_mass, node_feats, num_max_anc=1):
-    """ Remove enforce the maxmium number of ancestors. If more than num_max_anc
-    halos have the same descendant, only keep the num_max_anc most massive ones.
-
-    Note that this code assumes the halos are sorted by snapshot number starting
-    from teh root halo.
-    """
-    if num_max_anc < 1:
-        raise ValueError("num_max_anc must be >= 1.")
-
-    # identify the halos with the same descendant
+def calc_num_progenitors(halo_ids, halo_desc_ids):
+    """ Calculate the number of progenitors for each halo. """
     unique_desc_ids, counts = np.unique(halo_desc_ids, return_counts=True)
-    bad_indices = []
+    num_progenitors = np.zeros(len(halo_desc_ids), dtype=np.int32)
     for desc_id, count in zip(unique_desc_ids, counts):
-        if count <= num_max_anc:
-            continue
-        # find the indices of the halos with this desc_id
-        indices = np.where(halo_desc_ids == desc_id)[0]
+        num_progenitors[halo_ids == desc_id] = count
+    return num_progenitors
 
-        # sort the indices by mass and keep the num_max_anc most massive ones
-        mass_indices = np.argsort(halo_mass[indices])[::-1]
-        bad_indices.append(indices[mass_indices[num_max_anc:]])
+def process_progenitors(
+    halo_ids, halo_desc_ids, halo_mass, node_feats,
+    num_max_prog=1, min_mass_ratio=0.01, return_prog_position=True
+    ):
+    """ Process the progenitors of each halo by sorting them by mass and removin
+    any progenitors that are not the most massive or have a mass ratio less than
+    min_mass_ratio. """
 
-    if len(bad_indices) == 0:
-        return halo_ids, halo_desc_ids, node_feats
+    def fun(index, halo_ids, halo_desc_ids, halo_mass, num_max_prog=1, min_mass_ratio=0.01, prog_pos=0):
+        """ Recursively sort the progenitors of a halo by mass and return the sorted indices. """
+
+        # Get the current halo ID and indices of its progenitors
+        halo_id = halo_ids[index]
+        halo_desc_indices = np.where(halo_desc_ids == halo_id)[0]
+
+        # Start with the current halo index in the sorted list
+        sorted_index = [index, ]
+        prog_position = [prog_pos, ]
+
+        if len(halo_desc_indices) == 0:
+            return sorted_index, prog_position
+
+        # Sort the progenitors by mass in descending order
+        sort = np.argsort(halo_mass[halo_desc_indices])[::-1]
+        sorted_desc_indices = halo_desc_indices[sort]
+        halo_desc_mass = halo_mass[sorted_desc_indices]
+        halo_desc_mass_ratio = halo_desc_mass / np.max(halo_desc_mass)
+
+        mask = halo_desc_mass_ratio > min_mass_ratio
+        sorted_desc_indices = sorted_desc_indices[mask][:num_max_prog]
+
+        # Recursively process each progenitor and gather their sorted indices
+        for i, progenitor_index in enumerate(sorted_desc_indices):
+            s, p = fun(
+                progenitor_index,
+                halo_ids,
+                halo_desc_ids,
+                halo_mass,
+                num_max_prog=num_max_prog,
+                min_mass_ratio=min_mass_ratio,
+                prog_pos=i
+            )
+            sorted_index.extend(s)
+            prog_position.extend(p)
+
+        return sorted_index, prog_position
+
+    sorted_index, prog_position = fun(
+        0, halo_ids, halo_desc_ids, halo_mass,
+        num_max_prog=num_max_prog, min_mass_ratio=min_mass_ratio, prog_pos=0)
+    new_node_feats = node_feats[sorted_index]
+    new_halo_ids = halo_ids[sorted_index]
+    new_halo_desc_ids = halo_desc_ids[sorted_index]
+    prog_position = np.array(prog_position)
+
+    if return_prog_position:
+        return new_halo_ids, new_halo_desc_ids, new_node_feats, prog_position
     else:
-        bad_indices = np.concatenate(bad_indices)
+        return new_halo_ids, new_halo_desc_ids, new_node_feats
 
-    # iterate over all halos and add only good halos
-    # good halos are those that are not in bad_indices and have a valid desc_id
-    new_node_feats = []
-    new_halo_ids = []
-    new_halo_desc_ids = []
-    for i in range(len(halo_ids)):
-        accept = (i not in bad_indices) and np.isin(halo_desc_ids[i], new_halo_ids)
-        accept = accept or (halo_desc_ids[i] == -1)  # always keep the root halo (desc_id = -1)
-        if accept:
-            new_node_feats.append(node_feats[i])
-            new_halo_ids.append(halo_ids[i])
-            new_halo_desc_ids.append(halo_desc_ids[i])
-    new_node_feats = np.stack(new_node_feats, axis=0)
-    new_halo_ids = np.array(new_halo_ids)
-    new_halo_desc_ids = np.array(new_halo_desc_ids)
-
-    return new_halo_ids, new_halo_desc_ids, new_node_feats
-
-def calc_num_ancestors(halo_ids, halo_desc_ids):
-    """ Calculate the number of ancestors for each halo. """
-    unique_desc_ids, counts = np.unique(halo_desc_ids, return_counts=True)
-    num_ancestors = np.zeros(len(halo_desc_ids), dtype=np.int32)
-    for desc_id, count in zip(unique_desc_ids, counts):
-        num_ancestors[halo_ids == desc_id] = count
-    return num_ancestors
