@@ -109,9 +109,9 @@ def infer(config: ml_collections.ConfigDict):
     root_features = [sim_data[i].x[0, :-1] for i in range(num_sim)]
 
     # job division
-    batch_size = len(times_out) // config.data_infer.num_job
-    start = batch_size * config.data_infer.job_id
-    end = batch_size * (config.data_infer.job_id + 1)
+    job_size = len(times_out) // config.data_infer.num_job
+    start = job_size * config.data_infer.job_id
+    end = job_size * (config.data_infer.job_id + 1)
     if config.data_infer.job_id == config.data_infer.num_job - 1:
         end = len(times_out)
     times_out = times_out[start:end]
@@ -125,7 +125,7 @@ def infer(config: ml_collections.ConfigDict):
 
     tree_list = infer_utils.generate_forest(
         model, root_features, times_out, norm_dict=model.norm_dict, device=device,
-        sort=True, snapshot_list=snapshot_list, verbose=True)
+        batch_size=conifg.batch_size, sort=True, snapshot_list=snapshot_list, verbose=True)
 
     # Write to file
     os.makedirs(config.data_infer.outdir, exist_ok=True)

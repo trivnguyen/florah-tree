@@ -4,6 +4,7 @@ import time
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.data import Data
 from tqdm import tqdm
 
@@ -57,40 +58,78 @@ def sort_tree(tree, sort_prop=0):
     return new_tree
 
 @torch.no_grad()
-def generate_tree(
+def _generate_next_progenitors(model, loader, device):
+    """ Return Xprog and Nprog """
+
+    Xprog_all = []
+    Nprog_all = []
+    for batch in loader:
+        Hhist_batch = batch[0].to(device)
+        Zhist_batch = batch[1].to(device)
+        z_prog_batch = batch[2].to(device)
+        batch_size = Hhist_batch.size(0)
+
+        # 1. pass through the encoder
+        x_enc = model.encoder(Hhist_batch, Zhist_batch)
+
+        # 2. pass through classifier and compute the multinomial distribution
+        x_enc_reduced = models_utils.summarize_features(
+            x_enc, reduction='last', padding_mask=None)
+        x_class = x_enc_reduced + model.classifier_context_embed(z_prog_batch)
+        x_class = model.classifier(x_class)
+        y_class = torch.multinomial(x_class.softmax(dim=-1), 1)
+        y_class_onehot = torch.nn.functional.one_hot(
+            y_class, num_classes=model.num_classes).float()
+        y_class_context = model.npe_context_embed(y_class_onehot).squeeze(1)
+        Nprog = (y_class + 1)
+
+        # 3. create the progenitors using the decoder and the flows
+        # always generate the maximum number of progenitors
+        Xprog = torch.zeros((batch_size, model.num_classes + 1, Hhist_batch.size(-1)), device=device)
+        for i in range(model.num_classes):
+            if model.decoder_args.name == 'transformer':
+                x_dec = model.decoder(
+                    Xprog[:, :i+1],
+                    memory=x_enc,
+                    context=z_prog_batch,
+                    tgt_padding_mask=None,
+                    memory_padding_mask=None
+                )
+            elif model.decoder_args.name == 'gru':
+                x_dec = model.decoder(
+                    x=Xprog[:, :i+1],
+                    t=z_prog_batch.unsqueeze(1).expand(-1, i+1, -1),
+                )
+            x_dec = x_dec[:, -1]
+            context = x_dec + y_class_context + x_enc_reduced
+            prog_feats = model.npe.flow(model.npe(context)).sample()
+            Xprog[:, i+1] = prog_feats
+
+        # store the halos
+        Xprog_all.append(Xprog[:, 1:])
+        Nprog_all.append(Nprog)
+    Xprog_all = torch.cat(Xprog_all, dim=0)
+    Nprog_all = torch.cat(Nprog_all, dim=0)
+
+    return Xprog_all, Nprog_all
+
+@torch.no_grad()
+def _generate_all_progenitors(
     model,
-    x_root: torch.Tensor,
-    t_out: torch.Tensor,
+    x0: torch.Tensor,
+    Zhist: torch.Tensor,
     norm_dict: Optional[Dict[str, torch.Tensor]] = None,
-    n_max_iter: int = 1000,
+    batch_size: int = 1024,
     device: Optional[torch.device] = None,
+    verbose: bool = False
 ):
-    """
-    Autoregressively generate a tree from the root node.
-
-    Args:
-        model: the autoregressive tree generation model
-        x_root: the root node features, shape (n_features,)
-        t_out: the output times, shape (n_times,)
-        norm_dict: the normalization dictionary
-        n_max_iter: the maximum number of iterations
-        device: the device to run the model on
-
-    Returns:
-        tree: the generated tree
-    """
+    """ Generate merger trees with batching """
     model.eval()
     use_desc_mass_ratio = model.training_args.use_desc_mass_ratio
 
-    device = device or model.device
-    if not isinstance(x_root, torch.Tensor):
-        x_root = torch.tensor(x_root, device=device).float()
-    else:
-        x_root = x_root.to(device).float()
-    if not isinstance(t_out, torch.Tensor):
-        t_out = torch.tensor(t_out, device=device).float()
-    else:
-        t_out = t_out.to(device).float()
+    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    x0 = x0.to(device).float()
+    Zhist = Zhist.to(device).float()
 
     # normalizing data
     if norm_dict is not None:
@@ -99,159 +138,133 @@ def generate_tree(
         t_loc = torch.tensor(norm_dict['t_loc'], dtype=torch.float32, device=device)
         t_scale = torch.tensor(norm_dict['t_scale'], dtype=torch.float32, device=device)
     else:
-        x_loc = torch.zeros(x_root.size(0), device=device)
-        x_scale = torch.ones(x_root.size(0), device=device)
+        x_loc = torch.zeros(x0.size(0), device=device)
+        x_scale = torch.ones(x0.size(0), device=device)
         t_loc = torch.zeros(1, device=device)
         t_scale = torch.ones(1, device=device)
-    x_root = (x_root - x_loc) / x_scale
-    t_out = (t_out - t_loc) / t_scale
+    x0 = (x0 - x_loc) / x_scale
+    Zhist = (Zhist - t_loc) / t_scale
 
-    # initialize the tree
-    halo_t_index = [0]
-    halo_index = [0]
-    halo_remain_index = [0]  # index of the remining halos to be processed
-    next_halo_index = 1
-    edge_index= [[], []]  # keep edge index as a list to make appending easier
-    halo_feats = torch.stack([x_root], dim=0)
-    time_feats = torch.stack([t_out[0]], dim=0)
-    prog_positions = torch.stack([torch.tensor([0, ], dtype=torch.float32, device=device)], dim=0)
-    snap_indices = [0]
+    # start generating the trees snapshot-by-snapshot
+    Ntree = len(x0)
+    Nz = len(Zhist)
 
-    # start generating the tree
-    while (len(halo_remain_index) > 0) & (n_max_iter > 0):
-        halo_curr_index = halo_remain_index.pop(0)
-        halo_curr_t_index = halo_t_index.pop(0)
-        if halo_curr_t_index == len(t_out) - 1:
-            # reach the last snapshot
-            continue
+    # initialize the halo and time features with only the root
+    halo_feats = [x0.cpu()]
+    time_feats = [Zhist[:1].expand(Ntree, 1).cpu()]
+    edge_index = [[], []]
+    snap_index = [0] * Ntree
+    tree_index = list(range(Ntree))
 
-        # 0. get input sequence features and next time step
-        path = training_utils.find_path_from_root(
-            torch.tensor(edge_index, dtype=torch.long), halo_curr_index)
+    Hhist_desc_next = x0.unsqueeze(1)
+    halo_index_next = Ntree
+    desc_index_curr = list(range(Ntree))
 
-        # Processing Transformer input and time steps
-        src = halo_feats[path].unsqueeze(0)  # add batch dim
-        src_t = t_out[:halo_curr_t_index+1].unsqueeze(0)  # add batch dim
-        tgt_t = t_out[halo_curr_t_index + 1].unsqueeze(0) # add batch dim
+    for i in range(Nz-1):
+        Hhist_desc = Hhist_desc_next
+        Zhist_desc = Zhist[:i+1].unsqueeze(0).expand(len(Hhist_desc), i+1, 1)
+        z_prog = Zhist[i+1].unsqueeze(0).expand(len(Hhist_desc), 1)
 
-        # start generating the next halo
-        # 1. pass the input sequence through the encoder
-        x_enc = model.encoder(src, src_t)
-        x_enc_reduced = models_utils.summarize_features(
-            x_enc, reduction='last', padding_mask=None)
+        loader = DataLoader(
+            TensorDataset(Hhist_desc, Zhist_desc, z_prog), batch_size=batch_size,
+            shuffle=False)
 
-        # 2. pass the encoded sequence through the classifier
-        # sample the number of progenitors from the predicted distribution
-        x_class = x_enc_reduced + model.classifier_context_embed(tgt_t)
-        x_class = model.classifier(x_class)
-        y_class = torch.multinomial(x_class.softmax(dim=-1), 1)
-        y_class_onehot = torch.nn.functional.one_hot(
-            y_class, num_classes=model.num_classes).float()
-        y_class_context = model.npe_context_embed(y_class_onehot).squeeze(1)
-        n_prog = (y_class + 1).item()
+        if verbose:
+            print('Generating progenitors for snapshot {}/{}'.format(i+1, Nz-1))
+            loader = tqdm(loader)
+        Xprog, Nprog = _generate_next_progenitors(model, loader, device)
 
-        # 3. create the progenitors using the decoder and the flows
-        tgt_in = torch.zeros((1, n_prog+1, x_root.size(0)), device=device)
-        for iprog in range(n_prog):
-            # pass the encoded sequence through the decoder
-            if model.decoder_args.name == 'transformer':
-                x_dec = model.decoder(
-                    tgt_in[:, :-1],
-                    memory=x_enc,
-                    context=tgt_t,
-                    tgt_padding_mask=None,
-                    memory_padding_mask=None
-                )
-            elif model.decoder_args.name == 'gru':
-                x_dec = model.decoder(
-                    x=tgt_in[:, :iprog + 1],
-                    t=tgt_t.unsqueeze(1).expand(-1, iprog + 1, -1),
-                )
-            x_dec = x_dec[:, -1]
-            context = x_dec + y_class_context + x_enc_reduced
-            tgt_in[:, iprog + 1] = model.npe.flow(model.npe(context)).sample()
+        # construct the descendant history list for the next snapshot
+        Hhist_desc_next = []
+        desc_index_next = []
+        for j in range(len(Xprog)):
+            for k in range(Nprog[j]):
+                Xprog_ = Xprog[j, k].unsqueeze(0)
+                Hhist_desc_next.append(torch.cat([Hhist_desc[j], Xprog_], dim=0))
 
-        prog_feats = tgt_in[0, 1:]
-        if use_desc_mass_ratio:
-            prog_feats[:, 0] = prog_feats[:, 0] + src[:, -1, 0]
+                # store the progenitor information
+                halo_feats.append(Xprog_.cpu())
+                time_feats.append(Zhist[i+1].unsqueeze(0).cpu())
+                edge_index[0].append(desc_index_curr[j])
+                edge_index[1].append(halo_index_next)
+                tree_index.append(tree_index[desc_index_curr[j]])   # same tree index with the parent
+                snap_index.append(i+1)
+                desc_index_next.append(halo_index_next)
+                halo_index_next += 1
 
-        # print(time_feats.shape, halo_feats.shape, n_prog, tgt_in.shape, tgt_t.shape)
-        halo_feats = torch.cat([halo_feats, prog_feats], dim=0)
-        time_feats = torch.cat([time_feats, tgt_t.repeat(n_prog, 1)], dim=0)
-        prog_positions = torch.cat(
-            [prog_positions, torch.arange(n_prog).unsqueeze(1)], dim=0)
-        snap_indices.extend([halo_curr_t_index + 1] * n_prog)
+        Hhist_desc_next = torch.stack(Hhist_desc_next, dim=0)
+        desc_index_curr = desc_index_next
 
-        # create halo index for the progenitors
-        prog_index = [next_halo_index + i for i in range(n_prog)]
-        halo_index = halo_index + prog_index
-        halo_remain_index = halo_remain_index + prog_index
-        halo_t_index = halo_t_index + [halo_curr_t_index + 1] * n_prog
+    halo_feats = torch.cat(halo_feats, dim=0)
+    time_feats = torch.cat(time_feats, dim=0)
+    halo_feats = halo_feats * x_scale.cpu() + x_loc.cpu()
+    time_feats = time_feats * t_scale.cpu() + t_loc.cpu()
+    halo_index = torch.arange(len(halo_feats), dtype=torch.long)
+    tree_index = torch.tensor(tree_index, dtype=torch.long)
+    edge_index = torch.tensor(edge_index, dtype=torch.long)
+    snap_index = torch.tensor(snap_index, dtype=torch.long)
 
-        # create edge index for the progenitors
-        edge_index[0] = edge_index[0] + [halo_curr_index] * n_prog
-        edge_index[1] = edge_index[1] + prog_index
-        next_halo_index += n_prog
+    return halo_feats, time_feats, halo_index, tree_index, edge_index, snap_index
 
-        n_max_iter -= 1
-        if n_max_iter == 0:
-            print('Max number of iterations reached')
-
-    # unnormalize the features
-    halo_feats = halo_feats * x_scale + x_loc
-    time_feats = time_feats * t_scale + t_loc
-    return Data(
-        x=torch.cat([halo_feats, time_feats], dim=1),
-        edge_index=torch.tensor(edge_index, dtype=torch.long),
-        prog_positions=prog_positions,
-        snap_indices=torch.tensor(snap_indices, dtype=torch.long),
-    )
-
+@torch.no_grad()
 def generate_forest(
     model,
-    root_features: List[torch.Tensor],
-    times_out: List[torch.Tensor],
+    x0: torch.Tensor,
+    Zhist: torch.Tensor,
     norm_dict: Optional[Dict[str, torch.Tensor]] = None,
-    n_max_iter: int = 1000,
+    batch_size: int = 1024,
     device: Optional[torch.device] = None,
     snapshot_list: Optional[List[int]] = None,
     sort: bool = False,
     verbose: bool = False
 ):
-    """ Generate multiple trees
-
-    NOTE: the root_features should have the dimnesion of (batch_size, n_feat) instead
-    of (n_feat,) even if the batch size is 1.
     """
-    if len(root_features) != len(times_out):
-        raise ValueError('root_features and times_out must have the same length')
+    Generate merger trees with batching. Including multiple steps:
+    1. generate all progenitor for all root halos
+    2. reconstruct the trees by connecting the halos based on their tree index
+    """
+    t1 = time.time()
 
-    # generate trees for each root halo
-    tree_list = []
-    root_halo_range = range(len(root_features))
+    # 1. Generate all progenitors for all root halos
+    Ntree = len(x0)
+    halo_feats, time_feats, halo_index, tree_index, edge_index, snap_index = _generate_all_progenitors(
+        model, x0, Zhist, norm_dict=norm_dict, batch_size=batch_size, device=device, verbose=verbose)
 
-    loop = tqdm(
-        root_halo_range, desc="Generating trees",
-        miniters=len(root_features) // 100, disable=not verbose)
+    t2 = time.time()
 
-    time_start = time.time()
-    for i in loop:
-        tree = generate_tree(
-            model,
-            x_root=root_features[i],
-            t_out=times_out[i],
-            norm_dict=norm_dict,
-            n_max_iter=n_max_iter,
-            device=device
+    # 2. Reconstruct the tree
+    forest = []   # list of trees
+    if verbose:
+        print("Reconstructing the trees...")
+        unique_tree_index = tqdm(range(Ntree))
+    else:
+        unique_tree_index = range(Ntree)
+    for i in unique_tree_index:
+        halo_feats_t = halo_feats[tree_index == i]
+        time_feats_t = time_feats[tree_index == i]
+        snap_index_t = snap_index[tree_index == i]
+
+        # remap the global halo index to the local halo index (range from 0 to Nhalo)
+        halo_index_t = halo_index[tree_index == i]
+        edge_index_t = edge_index[:, (tree_index[edge_index[0]] == i) & (tree_index[edge_index[1]] == i)]
+        edge_index_t_remap = torch.searchsorted(halo_index_t, edge_index_t)
+
+        # create the tree
+        tree = Data(
+            x=torch.cat([halo_feats_t, time_feats_t], dim=1),
+            edge_index=edge_index_t_remap,
+            snap_indices=snap_index_t,
         )
         if snapshot_list is not None:
-            tree.snap = snapshot_list[i][tree.snap_indices]
+            tree.snap = snapshot_list[tree.snap_indices]
         if sort:
             tree = sort_tree(tree)
-        # always return a CPU tensor for memory efficiency
-        tree_list.append(tree.cpu())
-    time_end = time.time()
-    if verbose:
-        print(f'Time elapsed: {time_end - time_start:.2f} s')
+        forest.append(tree)
+    t3 = time.time()
 
-    return tree_list
+    if verbose:
+        print('Time elapsed for generating progenitors:', t2 - t1)
+        print('Time elapsed for reconstructing the trees:', t3 - t2)
+        print('Total time elapsed:', t3 - t1)
+
+    return forest
