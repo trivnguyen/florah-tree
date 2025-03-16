@@ -97,6 +97,9 @@ def prepare_dataloader(
         d.x[..., :-1] = (d.x[..., :-1] - x_loc) / x_scale
         d.x[..., -1:] = (d.x[..., -1:] - t_loc) / t_scale
 
+    print("Number of training samples: {}".format(num_train))
+    print("Number of validation samples: {}".format(num_total - num_train))
+
     print("Normalization statistics:")
     print("x_loc: {}".format(x_loc))
     print("x_scale: {}".format(x_scale))
