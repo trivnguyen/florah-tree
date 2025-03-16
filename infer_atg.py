@@ -101,22 +101,18 @@ def infer(config: ml_collections.ConfigDict):
     aexp_times_out = aexp_table[select][::config.data_infer.step]
     zred_times_out = z_table[select][::config.data_infer.step]
 
-    # create a tensor array for times and do job division
-    times_out = [
-        torch.tensor(aexp_times_out, dtype=torch.float32).unsqueeze(1) for i in range(num_sim)]
-    snapshot_list = [
-        torch.tensor(snap_times_out, dtype=torch.long) for i in range(num_sim)]
-    root_features = [sim_data[i].x[0, :-1] for i in range(num_sim)]
+    # create a tensor array for times
+    x0 = torch.stack([sim_data[i].x[0, :-1] for i in range(num_sim)], dim=0)
+    Zhist = torch.tensor(aexp_times_out, dtype=torch.float32).unsqueeze(1)
+    snapshot_list = torch.tensor(snap_times_out, dtype=torch.long)
 
     # job division
-    job_size = len(times_out) // config.data_infer.num_job
+    job_size = len(x0) // config.data_infer.num_job
     start = job_size * config.data_infer.job_id
     end = job_size * (config.data_infer.job_id + 1)
     if config.data_infer.job_id == config.data_infer.num_job - 1:
-        end = len(times_out)
-    times_out = times_out[start:end]
-    snapshot_list = snapshot_list[start:end]
-    root_features = root_features[start:end]
+        end = len(x0)
+    x0 = x0[start:end]
 
     # Start generating tree
     # generate seed list
@@ -124,8 +120,8 @@ def infer(config: ml_collections.ConfigDict):
     pl.seed_everything(seed)
 
     tree_list = infer_utils.generate_forest(
-        model, root_features, times_out, norm_dict=model.norm_dict, device=device,
-        batch_size=conifg.batch_size, sort=True, snapshot_list=snapshot_list, verbose=True)
+        model, x0, Zhist, norm_dict=model.norm_dict, device=device,
+        batch_size=config.data_infer.batch_size, sort=True, snapshot_list=snapshot_list, verbose=True)
 
     # Write to file
     os.makedirs(config.data_infer.outdir, exist_ok=True)
