@@ -67,16 +67,27 @@ class AutoregTreeGen(pl.LightningModule):
             'max_sample_weight': 1,
             'use_desc_mass_ratio': False,
             'num_branches_per_tree': None,
+            'freeze_args': ConfigDict({
+                'encoder': False,
+                'decoder': False,
+                'npe': False,
+                'classifier': False,
+            }),
         })
         self.training_args = training_args_default
         if training_args is not None:
             self.training_args.update(training_args)
+        self.freeze_args = self.training_args.freeze_args
         if self.training_args.training_mode not in ('all', 'classifier', 'npe'):
             raise ValueError(
                 f'Training mode {self.training_mode} not supported')
         self.save_hyperparameters()
 
         self._setup_model()
+
+    def _freeze_component(self, component, freeze=True):
+        for param in component.parameters():
+            param.requires_grad = not freeze
 
     def _setup_model(self):
 
@@ -108,7 +119,7 @@ class AutoregTreeGen(pl.LightningModule):
             raise NotImplementedError(
                 f'Encoder {self.encoder_args.name} not implemented')
 
-        # create the RNN and flows
+        # 2. Create the decoder network
         if self.decoder_args.name == 'transformer':
             self.decoder = TransformerDecoder(
                 d_in=self.d_in,
@@ -135,7 +146,7 @@ class AutoregTreeGen(pl.LightningModule):
             raise NotImplementedError(
                 f'Decoder {self.decoder_args.name} not implemented')
 
-        # create the NPE
+        # 3. Create the NPE
         self.npe_context_embed = nn.Linear(
             self.num_classes, self.decoder_args.d_model)
         self.npe = flows.NPE(
@@ -147,13 +158,31 @@ class AutoregTreeGen(pl.LightningModule):
             dropout=self.npe_args.dropout,
         )
 
-        # create the classifier
+        # 4. Create the classifier
         self.classifier_context_embed = nn.Linear(
             self.classifier_args.d_context, self.encoder_args.d_model)
         self.classifier = MLP(
             d_in=self.encoder_args.d_model,
             hidden_sizes=self.classifier_args.hidden_sizes + [self.num_classes,],
         )
+
+        # Freeze the components
+        self._freeze_component(self.encoder, self.freeze_args.encoder)
+        self._freeze_component(self.decoder, self.freeze_args.decoder)
+        self._freeze_component(self.npe, self.freeze_args.npe)
+        self._freeze_component(self.npe_context_embed, self.freeze_args.npe)
+        self._freeze_component(self.classifier, self.freeze_args.classifier)
+        self._freeze_component(self.classifier_context_embed, self.freeze_args.classifier)
+
+        # Check if the freezing is working appropriately
+        for name, component in zip(
+            ['encoder', 'decoder', 'npe', 'classifier'],
+            [self.encoder, self.decoder, self.npe, self.classifier]
+        ):
+            print(f'Checking {name} requires_grad')
+            for param in component.parameters():
+                assert param.requires_grad == not self.freeze_args[name]
+                print(f'{name} requires_grad: {param.requires_grad}')
 
     def _prepare_batch(self, batch):
         """ Prepare the batch for training. """
