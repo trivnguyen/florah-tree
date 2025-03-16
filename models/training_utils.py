@@ -73,8 +73,8 @@ def get_leaves(data):
     return leaf_nodes
 
 def prepare_batch_branch(
-    batch, max_split, return_weights=False, use_desc_mass_ratio=False,
-    use_prog_position=False
+    batch, max_split, return_weights=False, num_branches_per_tree=None,
+    use_desc_mass_ratio=False, use_prog_position=False
 ):
     """ Prepare a batch for training.
 
@@ -86,6 +86,8 @@ def prepare_batch_branch(
         The maximum number of progenitors to consider.
     return_weights : bool
         Whether to return the sample weights.
+    num_branches_per_tree: int
+        The number of branches to consider for each tree. If None, all branches are considered.
     use_desc_mass_ratio: bool
         If True, out_features is a ratio of the descendants of the selected node.
         Assuming that index of the mass feature is 0.
@@ -103,6 +105,10 @@ def prepare_batch_branch(
         leaves = get_leaves(graph)
         parents = graph.edge_index[0, torch.isin(graph.edge_index[1], leaves)]
         parents = parents[leaves-1 == parents]
+
+        if num_branches_per_tree is not None:
+            # select a random subset of parents
+            parents = parents[torch.randperm(len(parents))[:num_branches_per_tree]]
 
         for idx in parents:
             path = find_path_from_root(graph.edge_index, idx)

@@ -66,6 +66,7 @@ class AutoregTreeGen(pl.LightningModule):
             'use_sample_weight': False,
             'max_sample_weight': 1,
             'use_desc_mass_ratio': False,
+            'num_branches_per_tree': None,
         })
         self.training_args = training_args_default
         if training_args is not None:
@@ -159,6 +160,7 @@ class AutoregTreeGen(pl.LightningModule):
         src_feat, tgt_feat, num_prog, src_len, _ = training_utils.prepare_batch_branch(
             batch, self.num_classes,
             use_desc_mass_ratio=self.training_args.use_desc_mass_ratio,
+            num_branches_per_tree=self.training_args.num_branches_per_tree,
             use_prog_position=False,
             return_weights=False,
         )
