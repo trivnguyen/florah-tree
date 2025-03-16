@@ -101,7 +101,7 @@ def prepare_batch_branch(
     max_num_prog_batch = 0
 
     for i in range(batch.num_graphs):
-        graph = batch[i]
+        graph = batch[i].cpu()  # convert to CPU to avoid memory issues
         leaves = get_leaves(graph)
         parents = graph.edge_index[0, torch.isin(graph.edge_index[1], leaves)]
         parents = parents[leaves-1 == parents]
