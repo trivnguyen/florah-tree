@@ -7,6 +7,7 @@ import sys
 import datasets
 import ml_collections
 import numpy as np
+import torch
 import pytorch_lightning as pl
 import pytorch_lightning.loggers as pl_loggers
 import yaml
@@ -123,14 +124,36 @@ def train(
     )
 
     # train the model
-    logging.info("Training model...")
     pl.seed_everything(config.seed.training)
+    logging.info("Training model...")
+    logging.info(f"Training with seed {config.seed.training}.")
+    logging.info(f"Training for {config.training.max_epochs} epochs.")
+    logging.info(f"Training for {config.training.max_steps} steps.")
+    logging.info(f"Training with batch size {config.training.train_batch_size}.")
+    logging.info(f"Training with eval batch size {config.training.eval_batch_size}.")
+    logging.info(f"Training with gradient clip value {config.training.get('gradient_clip_val', 0)}.")
+    logging.info('Freezing settings')
+    logging.info(f"Freezing encoder: {config.training.freeze_args.encoder}")
+    logging.info(f"Freezing classifier: {config.training.freeze_args.classifier}")
+    logging.info(f"Freezing decoder: {config.training.freeze_args.decoder}")
+    logging.info(f"Freezing npe: {config.training.freeze_args.npe}")
+
+    if checkpoint_path is not None and config.get("reset_optimizer", False):
+        logging.info("Resetting optimizer state from checkpoint.")
+        ckpt = torch.load(checkpoint_path, map_location='cpu')
+        model_atg.load_state_dict(ckpt['state_dict'])
+
+        # Set checkpoint_path to None to avoid loading optimizer states in trainer.fit()
+        checkpoint_path = None
+
     trainer.fit(
         model_atg,
         train_dataloaders=train_loader,
         val_dataloaders=val_loader,
         ckpt_path=checkpoint_path,
     )
+
+
     # Done
     logging.info("Done!")
 

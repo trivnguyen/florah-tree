@@ -106,6 +106,11 @@ def infer(config: ml_collections.ConfigDict):
     Zhist = torch.tensor(aexp_times_out, dtype=torch.float32).unsqueeze(1)
     snapshot_list = torch.tensor(snap_times_out, dtype=torch.long)
 
+    # multiplicative factor
+    print(x0.shape)
+    x0 = x0.repeat(config.data_infer.multiplicative_factor, 1)
+    print(x0[:1000])
+
     # job division
     job_size = len(x0) // config.data_infer.num_job
     start = job_size * config.data_infer.job_id

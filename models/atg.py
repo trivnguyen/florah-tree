@@ -181,7 +181,7 @@ class AutoregTreeGen(pl.LightningModule):
         ):
             print(f'Checking {name} requires_grad')
             for param in component.parameters():
-                assert param.requires_grad == not self.freeze_args[name]
+                assert param.requires_grad == (not self.freeze_args[name])
                 print(f'{name} requires_grad: {param.requires_grad}')
 
     def _prepare_batch(self, batch):
