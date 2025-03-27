@@ -13,7 +13,7 @@ import yaml
 from absl import flags, logging
 from ml_collections import config_flags
 from models import utils
-from models.atg import AutoregTreeGen
+from models.atg2 import AutoregTreeGen2
 
 logging.set_verbosity(logging.INFO)
 
@@ -38,7 +38,7 @@ def train(
     data = datasets.read_dataset(
         dataset_root=config.data.root,
         dataset_name=config.data.name,
-        max_num_files=config.data.get("num_files", 1),
+        max_num_files=1,
     )
     data = data[:1000]
     train_loader, val_loader, norm_dict = datasets.prepare_dataloader(
@@ -54,7 +54,7 @@ def train(
 
     # create the model
     logging.info("Creating model...")
-    model_atg = AutoregTreeGen(
+    model_atg = AutoregTreeGen2(
         d_in=config.model.d_in,
         num_classes=config.model.num_classes,
         encoder_args=config.model.encoder,
@@ -104,9 +104,6 @@ def train(
         gradient_clip_val=config.training.get('gradient_clip_val', 0),
         enable_progress_bar=True,
         num_sanity_val_steps=0,
-        # log_every_n_steps=config.training.log_every_n_steps,
-        # val_check_interval=config.training.val_check_interval,
-        # check_val_every_n_epoch=None,
     )
 
     # train the model
