@@ -149,6 +149,8 @@ class AutoregTreeGen(pl.LightningModule):
         # 3. Create the NPE
         self.npe_context_embed = nn.Linear(
             self.num_classes, self.decoder_args.d_model)
+        self.npe_position_embed = nn.Linear(
+            self.num_classes, self.decoder_args.d_model)
         self.npe = flows.NPE(
             input_size=self.d_in,
             context_size=self.decoder_args.d_model,
@@ -203,6 +205,12 @@ class AutoregTreeGen(pl.LightningModule):
         num_prog = num_prog[~src_padding_mask]
         tgt, tgt_t = tgt_feat[:, :, :-1], tgt_feat[:, 0, -1:]
 
+        # create a one-hot position vector for tgt features
+        tgt_pos = torch.arange(tgt.size(1)).unsqueeze(0).expand(tgt.size(0), -1)
+        tgt_pos = torch.nn.functional.one_hot(
+            tgt_pos, self.num_classes).float()
+        tgt_pos = tgt_pos.to(self.device)
+
         # add a starting token of all zeros to the first time step of tgt_feat
         # then, divide the rnn into the input and output component
         # the input will be feed into the RNN,
@@ -236,6 +244,7 @@ class AutoregTreeGen(pl.LightningModule):
             'tgt_in': tgt_in,
             'tgt_out': tgt_out,
             'tgt_t': tgt_t,
+            'tgt_pos': tgt_pos,
             'src_padding_mask': src_padding_mask,
             'tgt_padding_mask': tgt_padding_mask,
             'class_target': class_target,
@@ -309,8 +318,8 @@ class AutoregTreeGen(pl.LightningModule):
         if self.training_args.training_mode in ('all', 'npe'):
             context = self.npe_context_embed(batch_dict['class_target_onehot'])
             context = context.unsqueeze(1).expand_as(x_dec)
-            context = context + x_dec + x_enc.unsqueeze(1).expand_as(x_dec)
-
+            position_context = self.npe_position_embed(batch_dict['tgt_pos'])
+            context = context + position_context + x_dec + x_enc.unsqueeze(1).expand_as(x_dec)
             lp = self.npe.log_prob(batch_dict['tgt_out'], context=context)
             lp = lp * batch_dict['tgt_padding_mask'].eq(0).float()
             flows_loss = -lp.mean()
@@ -363,7 +372,8 @@ class AutoregTreeGen(pl.LightningModule):
         if self.training_args.training_mode in ('all', 'npe'):
             context = self.npe_context_embed(batch_dict['class_target_onehot'])
             context = context.unsqueeze(1).expand_as(x_dec)
-            context = context + x_dec + x_enc.unsqueeze(1).expand_as(x_dec)
+            position_context = self.npe_position_embed(batch_dict['tgt_pos'])
+            context = context + position_context + x_dec + x_enc.unsqueeze(1).expand_as(x_dec)
             lp = self.npe.log_prob(batch_dict['tgt_out'], context=context)
             lp = lp * batch_dict['tgt_padding_mask'].eq(0).float()
             flows_loss = -lp.mean()
