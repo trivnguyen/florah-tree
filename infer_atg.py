@@ -23,7 +23,6 @@ from tqdm import tqdm
 import datasets
 from models import infer_utils, training_utils, models_utils, analysis_utils
 from models.atg import AutoregTreeGen
-from models.atg2 import AutoregTreeGen2
 
 DEFAULT_METADATA_DIR = "/mnt/ceph/users/tnguyen/florah-tree/metadata"
 
@@ -84,13 +83,8 @@ def infer(config: ml_collections.ConfigDict):
             raise FileNotFoundError(f"Checkpoint {checkpoint_path} not found")
 
     print(f'Loading model from checkpoint {checkpoint_path}')
-    if config.model.name == 'atg2':
-        model = AutoregTreeGen2.load_from_checkpoint(checkpoint_path, map_location=device)
-        is_atg2 = True
-        print('Using ATG2')
-    else:
-        model = AutoregTreeGen.load_from_checkpoint(checkpoint_path, map_location=device)
-        is_atg2 = False
+    model = AutoregTreeGen.load_from_checkpoint(checkpoint_path, map_location=device)
+    is_atg2 = True
     model.eval()
 
     # get the root features from the root data
