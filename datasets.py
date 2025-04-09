@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import os
 import pickle
@@ -6,6 +6,7 @@ import pickle
 import ml_collections
 import numpy as np
 import torch
+from torch.utils.data import WeightedRandomSampler
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import from_networkx, to_networkx
@@ -34,6 +35,50 @@ def read_dataset(
         data = [from_networkx(d) for d in data]
     return data
 
+def create_sampler(
+    data: List[Data],
+    bins: Union[int, Tuple] = 10,
+    weighting_scheme: str = "inverse_frequency",
+    replacement: bool = True,
+):
+    """ Create a WeightedRandomSampler for the dataset.
+    By default, use the root mass as the label
+    """
+
+    print('Creating sampler with {} bins'.format(bins))
+    print('Weighting scheme: {}'.format(weighting_scheme))
+    print('Replacement: {}'.format(replacement))
+
+    # Bins the labels, by default use the root mass as the label
+    labels = np.array([d.x[0, 0].item() for d in data])
+    hist, bin_edges = np.histogram(labels, bins=bins)
+    bin_indices = np.digitize(labels, bin_edges[:-1])
+
+    # Compute class weights (inverse frequency)
+    counts = np.bincount(bin_indices)
+    if weighting_scheme == "inverse_frequency":
+        class_weights = 1.0 / counts
+    elif weighting_scheme == "inverse_square_root_frequency":
+        class_weights = 1.0 / np.sqrt(counts)
+    elif weighting_scheme == "inverse_log_frequency":
+        class_weights = 1.0 / np.log1p(counts + 1)
+    else:
+        raise ValueError("Unknown weighting scheme: {}".format(
+            weighting_scheme))
+    class_weights = class_weights / class_weights.sum() * len(class_weights)
+
+    print("Bin edges: {}".format(bin_edges))
+    print("Bin counts: {}".format(hist))
+    print('Weights: {}'.format(class_weights))
+
+    # Calculate sample weights
+    sample_weights = torch.tensor([class_weights[bin_idx] for bin_idx in bin_indices])
+    sampler = WeightedRandomSampler(
+        sample_weights, len(sample_weights), replacement=replacement
+    )
+
+    return sampler
+
 
 def prepare_dataloader(
     data: List,
@@ -43,7 +88,9 @@ def prepare_dataloader(
     num_workers: int = 0,
     norm_dict: dict = None,
     reverse_time: bool = False,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    use_sampler: bool = False,
+    sampler_args: dict = None,
 ):
     """
     Prepare the dataloader for training and evaluation.
@@ -56,6 +103,8 @@ def prepare_dataloader(
         norm_dict: dictionary containing normalization statistics.
         reverse_time: whether to reverse the time axis
         seed: random seed for shuffling the data.
+        use_sampler: whether to use a sampler for the training set.
+        sampler_args: arguments for the sampler.
     Returns:
         train_loader: PyTorch DataLoader for training.
         val_loader: PyTorch DataLoader for evaluation.
@@ -67,6 +116,16 @@ def prepare_dataloader(
 
     num_total = len(data)
     num_train = int(num_total * train_frac)
+
+    # create a sampler for the training set
+    # because the weight is based on root mass, this needs to be done before
+    # the normalization
+    if use_sampler:
+        sampler = create_sampler(data[:num_train], **sampler_args)
+        shuffle = False
+    else:
+        sampler = None
+        shuffle = True
 
     # calculate the normaliziation statistics
     if norm_dict is None:
@@ -108,7 +167,7 @@ def prepare_dataloader(
 
     # create data loader
     train_loader = DataLoader(
-        data[:num_train], batch_size=train_batch_size, shuffle=True,
+        data[:num_train], batch_size=train_batch_size, shuffle=shuffle, sampler=sampler,
         num_workers=num_workers, pin_memory=torch.cuda.is_available())
     val_loader = DataLoader(
         data[num_train:], batch_size=eval_batch_size, shuffle=False,

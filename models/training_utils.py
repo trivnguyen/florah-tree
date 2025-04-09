@@ -66,11 +66,9 @@ def get_leaves(data):
     Returns:
     torch.Tensor: A tensor containing the indices of the leaf nodes.
     """
-    edge_index = data.edge_index.to(data.x.device)
-    source_nodes = edge_index[0].unique()
-    all_nodes = torch.arange(data.num_nodes, device=data.x.device)
-    leaf_nodes = all_nodes[~torch.isin(all_nodes, source_nodes)]
-    return leaf_nodes
+    source_nodes = data.edge_index[0]
+    target_nodes = data.edge_index[1]
+    return target_nodes[torch.where(~torch.isin(target_nodes, source_nodes))[0]]
 
 def prepare_batch_branch(
     batch, max_split, return_weights=False, num_branches_per_tree=None,
@@ -102,6 +100,8 @@ def prepare_batch_branch(
 
     for i in range(batch.num_graphs):
         graph = batch[i].cpu()  # convert to CPU to avoid memory issues
+        graph_nprog = torch.bincount(graph.edge_index[0], minlength=graph.num_nodes)
+
         leaves = get_leaves(graph)
         parents = graph.edge_index[0, torch.isin(graph.edge_index[1], leaves)]
         parents = parents[leaves-1 == parents]
@@ -112,8 +112,7 @@ def prepare_batch_branch(
 
         for idx in parents:
             path = find_path_from_root(graph.edge_index, idx)
-            adj = to_dense_adj(graph.edge_index)[0]
-            num_prog = torch.sum(adj[path], axis=1, dtype=torch.long)
+            num_prog = graph_nprog[path]
             max_num_prog_batch = max(max_num_prog_batch, num_prog.max().item())
 
             if use_prog_position:
