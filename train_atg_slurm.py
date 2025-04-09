@@ -171,8 +171,6 @@ def train(
         num_sanity_val_steps=0,
         # Add sync_batchnorm for multi-GPU training if batch norm is used
         sync_batchnorm=True if (gpus_per_node > 1 or num_nodes > 1) else False,
-        # Avoid memory issues with persistent workers if using multiple GPUs
-        persistent_workers=config.training.get("persistent_workers", True) if gpus_per_node > 1 else False,
     )
 
     # train the model

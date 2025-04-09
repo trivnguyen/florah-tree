@@ -168,9 +168,13 @@ def prepare_dataloader(
     # create data loader
     train_loader = DataLoader(
         data[:num_train], batch_size=train_batch_size, shuffle=shuffle, sampler=sampler,
-        num_workers=num_workers, pin_memory=torch.cuda.is_available())
+        num_workers=num_workers, pin_memory=torch.cuda.is_available(),
+        persistent_workers=persistent_workers if num_workers > 0 else False,
+    )
     val_loader = DataLoader(
         data[num_train:], batch_size=eval_batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=torch.cuda.is_available())
+        num_workers=num_workers, pin_memory=torch.cuda.is_available(),
+        persistent_workers=persistent_workers if num_workers > 0 else False,
+    )
 
     return train_loader, val_loader, norm_dict
