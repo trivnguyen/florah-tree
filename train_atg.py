@@ -64,6 +64,8 @@ def train(
         train_frac=config.data.train_frac,
         train_batch_size=config.training.train_batch_size,
         eval_batch_size=config.training.eval_batch_size,
+        use_sampler=config.training.get("use_sampler", False),
+        sampler_args=config.training.get("sampler_args"),
         num_workers=config.training.get("num_workers", 0),
         seed=config.seed.data,
         norm_dict=None,
