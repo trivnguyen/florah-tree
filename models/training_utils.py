@@ -127,7 +127,7 @@ def prepare_batch_branch(
 
             out = torch.zeros((len(path), max_split, graph.x.size(1)), device=graph.x.device)
             for i, node in enumerate(path):
-                temp = graph.x[adj[node].eq(1)]
+                temp = graph.x[graph.edge_index[1][graph.edge_index[0]==node]]
                 if use_desc_mass_ratio:
                     temp[:, 0] = temp[:, 0] - graph.x[node, 0]
                 out[i][:num_prog[i]] += temp[:max_split]
