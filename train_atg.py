@@ -15,7 +15,6 @@ from absl import flags, logging
 from ml_collections import config_flags
 from models import utils
 from models.atg import AutoregTreeGen
-from models.atg3 import AutoregTreeGen3
 
 logging.set_verbosity(logging.INFO)
 
@@ -74,34 +73,19 @@ def train(
 
     # create the model
     logging.info("Creating model...")
-    if config.model.get("name", "atg") in ("atg", "atg2"):
-        logging.info("Creating ATG model.")
-        model_atg = AutoregTreeGen(
-            d_in=config.model.d_in,
-            num_classes=config.model.num_classes,
-            encoder_args=config.model.encoder,
-            decoder_args=config.model.decoder,
-            npe_args=config.model.npe,
-            classifier_args=config.model.classifier,
-            optimizer_args=config.optimizer,
-            scheduler_args=config.scheduler,
-            training_args=config.training,
-            norm_dict=norm_dict,
-        )
-    elif config.model.get("name", "atg") == "atg3":
-        logging.info("Creating ATG3 model.")
-        model_atg = AutoregTreeGen3(
-            d_in=config.model.d_in,
-            num_classes=config.model.num_classes,
-            encoder_args=config.model.encoder,
-            decoder_args=config.model.decoder,
-            npe_args=config.model.npe,
-            classifier_args=config.model.classifier,
-            optimizer_args=config.optimizer,
-            scheduler_args=config.scheduler,
-            training_args=config.training,
-            norm_dict=norm_dict,
-        )
+    logging.info("Creating ATG model.")
+    model_atg = AutoregTreeGen(
+        d_in=config.model.d_in,
+        num_classes=config.model.num_classes,
+        encoder_args=config.model.encoder,
+        decoder_args=config.model.decoder,
+        npe_args=config.model.npe,
+        classifier_args=config.model.classifier,
+        optimizer_args=config.optimizer,
+        scheduler_args=config.scheduler,
+        training_args=config.training,
+        norm_dict=norm_dict,
+    )
 
     # Create call backs and trainer objects
     callbacks = [
