@@ -57,9 +57,9 @@ def create_sampler(
     # Compute class weights (inverse frequency)
     counts = np.bincount(bin_indices)
     if weighting_scheme == "inverse_frequency":
-        class_weights = 1.0 / counts
+        class_weights = np.where(counts > 0, 1.0 / counts, 0)
     elif weighting_scheme == "inverse_square_root_frequency":
-        class_weights = 1.0 / np.sqrt(counts)
+        class_weights = np.where(counts > 0, 1.0 / np.sqrt(counts), 0)
     elif weighting_scheme == "inverse_log_frequency":
         class_weights = 1.0 / np.log1p(counts + 1)
     else:
@@ -112,18 +112,26 @@ def prepare_dataloader(
     """
 
     rng = np.random.default_rng(seed)
-    rng.shuffle(data)
-
-    num_total = len(data)
-    num_train = int(num_total * train_frac)
 
     # create a sampler for the training set
     # because the weight is based on root mass, this needs to be done before
     # the normalization
     if use_sampler:
+        # apply root cut on the data
+        mroot = np.array([d.x[0, 0].item() for d in data])
+        mroot_min, m_root_max = min(sampler_args.bins), max(sampler_args.bins)
+        data = [data[i] for i in range(len(mroot)) if mroot_min <= mroot[i] <= m_root_max]
+        rng.shuffle(data)
+        num_total = len(data)
+        num_train = int(num_total * train_frac)
+
         sampler = create_sampler(data[:num_train], **sampler_args)
         shuffle = False
     else:
+        rng.shuffle(data)
+        num_total = len(data)
+        num_train = int(num_total * train_frac)
+
         sampler = None
         shuffle = True
 
@@ -133,8 +141,15 @@ def prepare_dataloader(
         t = torch.cat([d.x[..., -1:] for d in data[:num_train]])
 
         # standardize the input features and min-max normalize the time
-        x_loc = x.mean(dim=0)
-        x_scale = x.std(dim=0)
+        # x_loc = x.mean(dim=0)
+        # x_scale = x.std(dim=0)
+
+        # normalize x such that it is in range [-1, 1]
+        x_min = x.min(dim=0).values
+        x_max = x.max(dim=0).values
+        x_loc = (x_min + x_max) / 2
+        x_scale = (x_max - x_min) / 2
+
         t_loc = t.min()
         t_scale = t.max() - t_loc
         if reverse_time:

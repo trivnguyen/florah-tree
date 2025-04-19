@@ -84,7 +84,6 @@ def infer(config: ml_collections.ConfigDict):
 
     print(f'Loading model from checkpoint {checkpoint_path}')
     model = AutoregTreeGen.load_from_checkpoint(checkpoint_path, map_location=device)
-    is_atg2 = True
     model.eval()
 
     # get the root features from the root data
@@ -94,6 +93,7 @@ def infer(config: ml_collections.ConfigDict):
         index_start=config.data_infer.index_file_start,
         max_num_files=config.data_infer.num_files,
     )
+    sim_data = sim_data[:config.data_infer.num_max_trees]
     num_sim = len(sim_data)
 
     # read in the snapshot times from the simulation and get the times we want to infer
@@ -109,9 +109,7 @@ def infer(config: ml_collections.ConfigDict):
     snapshot_list = torch.tensor(snap_times_out, dtype=torch.long)
 
     # multiplicative factor
-    print(x0.shape)
     x0 = x0.repeat(config.data_infer.multiplicative_factor, 1)
-    print(x0[:1000])
 
     # job division
     job_size = len(x0) // config.data_infer.num_job
@@ -129,7 +127,7 @@ def infer(config: ml_collections.ConfigDict):
     tree_list = infer_utils.generate_forest(
         model, x0, Zhist, norm_dict=model.norm_dict, device=device,
         batch_size=config.data_infer.batch_size, sort=True, snapshot_list=snapshot_list, verbose=True,
-        atg2=is_atg2)
+        )
 
     # Write to file
     os.makedirs(config.data_infer.outdir, exist_ok=True)
