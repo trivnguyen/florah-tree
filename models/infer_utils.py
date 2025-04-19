@@ -58,7 +58,7 @@ def sort_tree(tree, sort_prop=0):
     return new_tree
 
 @torch.no_grad()
-def _generate_next_progenitors(model, loader, device, atg2=False):
+def _generate_next_progenitors(model, loader, device):
     """ Return Xprog and Nprog """
 
     Xprog_all = []
@@ -102,15 +102,13 @@ def _generate_next_progenitors(model, loader, device, atg2=False):
                 )
             x_dec = x_dec[:, -1]
 
-            if atg2:
-                pos = torch.full((batch_size, ), i, dtype=torch.long, device=device)
-                pos = torch.nn.functional.one_hot(pos, model.num_classes).float()
-                pos = pos.to(device)
-                pos_context = model.npe_position_embed(pos)
-                context = x_dec + y_class_context + x_enc_reduced + pos_context
-            else:
-                context = x_dec + y_class_context + x_enc_reduced
+            pos = torch.full((batch_size, ), i, dtype=torch.long, device=device)
+            pos = torch.nn.functional.one_hot(pos, model.num_classes).float()
+            pos = pos.to(device)
+            pos_context = model.npe_position_embed(pos)
+            context = x_dec + y_class_context + x_enc_reduced + pos_context
             prog_feats = model.npe.flow(model.npe(context)).sample()
+            # prog_feats = torch.clamp(prog_feats, max=1.0)
             Xprog[:, i+1] = prog_feats
 
         # store the halos
@@ -130,7 +128,6 @@ def _generate_all_progenitors(
     batch_size: int = 1024,
     device: Optional[torch.device] = None,
     verbose: bool = False,
-    atg2=False
 ):
     """ Generate merger trees with batching """
     model.eval()
@@ -181,7 +178,7 @@ def _generate_all_progenitors(
         if verbose:
             print('Generating progenitors for snapshot {}/{}'.format(i+1, Nz-1))
             loader = tqdm(loader)
-        Xprog, Nprog = _generate_next_progenitors(model, loader, device, atg2)
+        Xprog, Nprog = _generate_next_progenitors(model, loader, device)
 
         # construct the descendant history list for the next snapshot
         Hhist_desc_next = []
@@ -226,7 +223,6 @@ def generate_forest(
     snapshot_list: Optional[List[int]] = None,
     sort: bool = False,
     verbose: bool = False,
-    atg2: bool = False
 ):
     """
     Generate merger trees with batching. Including multiple steps:
@@ -239,7 +235,7 @@ def generate_forest(
     Ntree = len(x0)
     halo_feats, time_feats, halo_index, tree_index, edge_index, snap_index = _generate_all_progenitors(
         model, x0, Zhist, norm_dict=norm_dict, batch_size=batch_size, device=device, verbose=verbose,
-        atg2=atg2)
+    )
 
     t2 = time.time()
 
