@@ -13,7 +13,8 @@ from torch_geometric.utils import from_networkx, to_networkx
 
 def read_dataset(
     dataset_name: str, dataset_root: str, max_num_files: int = 1,
-    index_start: int=0, verbose: bool = True, prefix: str = "data"
+    index_start: int=0, verbose: bool = True, prefix: str = "data",
+    ignore_missing: bool = False
 ):
     data = []
     data_dir = os.path.join(dataset_root, dataset_name)
@@ -27,6 +28,8 @@ def read_dataset(
         else:
             if verbose:
                 print("Data file {} not found. Stopping".format(data_path))
+            if ignore_missing:
+                continue
             break
     if len(data) == 0:
         raise ValueError("No data found in the specified directory.")
