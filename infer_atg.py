@@ -21,8 +21,8 @@ from ml_collections import config_flags
 from tqdm import tqdm
 
 import datasets
-from models import infer_utils, training_utils, models_utils, analysis_utils
-from models.atg import AutoregTreeGen
+from florah_tree import infer_utils, training_utils, models_utils, analysis_utils
+from florah_tree.atg import AutoregTreeGen
 
 DEFAULT_METADATA_DIR = "/mnt/ceph/users/tnguyen/florah-tree/metadata"
 

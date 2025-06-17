@@ -4,9 +4,9 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from ml_collections.config_dict import ConfigDict
 
-from models import flows, models_utils, training_utils
-from models.transformer import TransformerEncoder, TransformerDecoder
-from models.models import MLP, GRU
+from florah_tree import flows, models_utils, training_utils
+from florah_tree.transformer import TransformerEncoder, TransformerDecoder
+from florah_tree.models import MLP, GRU
 
 class AutoregTreeGen(pl.LightningModule):
     """ Autoregressive tree generator model """

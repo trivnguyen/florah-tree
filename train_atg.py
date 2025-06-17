@@ -13,8 +13,8 @@ import pytorch_lightning.loggers as pl_loggers
 import yaml
 from absl import flags, logging
 from ml_collections import config_flags
-from models import utils
-from models.atg import AutoregTreeGen
+from florah_tree import utils
+from florah_tree.atg import AutoregTreeGen
 
 logging.set_verbosity(logging.INFO)
 

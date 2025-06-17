@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.data import Data
 from tqdm import tqdm
 
-from models import training_utils, models_utils
+from florah_tree import training_utils, models_utils
 
 def check_mass_sort(tree):
     """ Check if the mass is sorted correctly within the tree """
