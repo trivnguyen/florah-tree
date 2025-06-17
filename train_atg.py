@@ -156,7 +156,6 @@ def train(
         ckpt_path=checkpoint_path,
     )
 
-
     # Done
     logging.info("Done!")
 
