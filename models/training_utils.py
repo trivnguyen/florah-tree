@@ -72,7 +72,7 @@ def get_leaves(data):
 
 def prepare_batch_branch(
     batch, max_split, return_weights=False, num_branches_per_tree=None,
-    use_desc_mass_ratio=False, use_prog_position=False
+    use_desc_mass_ratio=False, use_prog_position=False, use_leaves=False
 ):
     """ Prepare a batch for training.
 
@@ -91,6 +91,8 @@ def prepare_batch_branch(
         Assuming that index of the mass feature is 0.
     use_prog_position: bool
         If True, concatenate the position of the progenitors to the input time features.
+    use_leaves: bool
+        If True, include the leaves as descendants. Required if num_prog=0 is allowed in the classifier.
     """
     features = []
     out_features = []
@@ -103,8 +105,11 @@ def prepare_batch_branch(
         graph_nprog = torch.bincount(graph.edge_index[0], minlength=graph.num_nodes)
 
         leaves = get_leaves(graph)
-        parents = graph.edge_index[0, torch.isin(graph.edge_index[1], leaves)]
-        parents = parents[leaves-1 == parents]
+        if not use_leaves:
+            parents = graph.edge_index[0, torch.isin(graph.edge_index[1], leaves)]
+            parents = parents[leaves-1 == parents]
+        else:
+            parents = leaves
 
         if num_branches_per_tree is not None:
             # select a random subset of parents
