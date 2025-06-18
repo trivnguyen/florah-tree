@@ -120,12 +120,9 @@ florah-tree/
 │   ├── analysis_utils.py # Utility functions for analyzing trees
 │   └── utils.py          # General utility functions
 ├── configs/              # Configuration files for training and inference
-│   ├── final-models/     # Configurations for published/production models
-│   └── misc/             # Other experimental or specific configurations
 ├── datasets.py          # Script for reading and preparing datasets
 ├── train_atg.py         # Main script for training FLORAH models
 ├── infer_atg.py         # Main script for generating trees with FLORAH
-├── slurm/                # SLURM scripts for running jobs on HPC clusters
 ├── tutorials/            # Jupyter notebooks for tutorials (if available)
 ├── README.md             # This file
 └── LICENSE               # Project license
