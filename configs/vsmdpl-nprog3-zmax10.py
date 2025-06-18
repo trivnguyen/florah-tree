@@ -1,12 +1,11 @@
-
 from ml_collections import config_dict
 
 def get_config():
     config = config_dict.ConfigDict()
 
     # logging configuration
-    config.workdir = '/mnt/ceph/users/tnguyen/florah-tree/logging/bug-fix/vsmdpl-nprog3-dt2_6-z10'
-    config.name = 'gru-gru-3'
+florah_tree    config.workdir = '/path/to/your/logging/directory/'
+    config.name = 'florah-model-example'
     config.overwrite = True
     config.enable_progress_bar = False
     config.checkpoint = None
@@ -21,8 +20,8 @@ def get_config():
     seed.inference = 82641312
 
     config.data = data = config_dict.ConfigDict()
-    data.root = "/mnt/ceph/users/tnguyen/florah-tree/datasets/processed/"
-    data.name = "vsmdpl-nprog3-dt2_6-z10"
+    data.root = "/path/to/your/datasets/processed/"
+    data.name = "your-dataset-name"
     data.num_files = 15
     data.index_file_start = 0
     data.train_frac = 0.8
@@ -30,8 +29,8 @@ def get_config():
 
     # inference dataset
     config.data_infer = data_infer = config_dict.ConfigDict()
-    data_infer.root = "/mnt/ceph/users/tnguyen/florah-tree/datasets/generate_seeds"
-    data_infer.name = "vsmdpl-test-nprog3-dt4-z10"
+    data_infer.root = "/path/to/your/datasets/inference_seeds"
+    data_infer.name = "your-inference-dataset-name"
     data_infer.multiplicative_factor = 1
     data_infer.num_files = 5
     data_infer.index_file_start = 0
@@ -42,8 +41,7 @@ def get_config():
     data_infer.step = 4
     data_infer.job_id = 0
     data_infer.num_job = 1
-    data_infer.outdir = f'/mnt/ceph/users/tnguyen/florah-tree/gen-datasets/testset/bug-fix/'\
-        f'vsmdpl-nprog3-dt2_6-z10/{config.name}/z10-7'
+    data_infer.outdir = f'/path/to/your/generated/datasets/{config.name}/'
 
    # model configuration
     config.model = model = config_dict.ConfigDict()
