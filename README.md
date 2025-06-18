@@ -11,10 +11,13 @@ Merger trees are fundamental for understanding the hierarchical assembly of dark
 - Learning directly from cosmological N-body simulation data (e.g., Very Small MultiDark Planck).
 - Representing merger trees as complete graph structures.
 - Generating trees that accurately reproduce a wide range of statistical properties (mass functions, progenitor mass functions, etc.) across different redshifts.
-- Providing a computationally efficient alternative to running full N-body simulations for generating merger trees.
 - Demonstrating compatibility with SAMs, producing galaxy-halo scaling relations consistent with simulation-based SAM outputs.
 
 ## 🚀 Quick Start
+
+### Public Data and Pre-trained Models
+Pre-trained models and example datasets are available on the Flatiron Institute's HPC Rusty at `/mnt/ceph/users/tnguyen/public/florah-trees`. If you don't have access to this directory, you can download both the pre-trained model and example datasets from Dropbox:
+- https://www.dropbox.com/scl/fo/mecsi8cfhgcp1bvdk36b5/ANJ6p6ZLqastyT9D8IzKGpY?rlkey=9wmvxppce86sm1hc3cfd5a3do&st=ecju2ah7&dl=0
 
 ### Prerequisites
 
@@ -172,24 +175,17 @@ This graph-based generation allows FLORAH to capture the full branching structur
 
 ## 📝 Citation
 
-If you use FLORAH in your research, please cite the following paper:
+Further publication details to be added here once available
 
-Nguyen et al. (2024). *FLORAH: A Generative Model for Dark Matter Halo Merger Trees.* (Further publication details to be added here once available).
-
-A BibTeX entry will be provided upon publication. For now, please refer to the work as "Nguyen et al. (2024), FLORAH".
+<!-- If you use FLORAH in your research, please cite the following paper: -->
+<!-- Nguyen et al. (in prep). -->
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-This work was trained on merger trees extracted from the Very Small MultiDark Planck (VSMDPL) N-body simulation, part of the MultiDark simulation suite. We thank the MultiDark team for making their data publicly available.
 
 ## 📧 Contact
 
 For questions or support, please open an issue on the GitHub repository.
 
 ---
-
-**Pre-trained Models**: As mentioned in the original `README.md`, pre-trained models can be found on Rusty at `/mnt/ceph/users/tnguyen/florah-tree-models`
