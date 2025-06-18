@@ -7,8 +7,6 @@ import pickle
 import glob
 import re
 
-sys.path.append('/mnt/home/tnguyen/projects/florah/florah-tree')
-
 import numpy as np
 import torch
 import pytorch_lightning as pl
