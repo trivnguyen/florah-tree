@@ -162,7 +162,7 @@ florah-tree/
 ## 📊 Model Architecture Highlights
 
 FLORAH generates merger trees autoregressively:
-1.  Given a halo, an **encoder** (typically a GRU) processes its properties and historical context.
+1.  Given a halo, an **encoder** (typically a GRU) processes its properties and assembly history.
 2.  A **classifier** predicts the number of progenitors this halo will have at the next time step.
 3.  For each progenitor:
     a.  A **decoder** (another GRU) and **normalizing flows** are used to sample its properties (e.g., mass).
