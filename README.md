@@ -162,16 +162,6 @@ florah-tree/
 -   **`florah_tree/flows.py`**:
     -   Implements the normalizing flow models used for sampling progenitor properties.
 
-## 📊 Model Architecture Highlights
-
-FLORAH generates merger trees autoregressively:
-1.  Given a halo, an **encoder** (typically a GRU) processes its properties and assembly history.
-2.  A **classifier** predicts the number of progenitors this halo will have at the next time step.
-3.  For each progenitor:
-    a.  A **decoder** (another GRU) and **normalizing flows** are used to sample its properties (e.g., mass).
-4.  This process is repeated recursively for each progenitor until the earliest time of interest is reached, forming a complete tree.
-
-This graph-based generation allows FLORAH to capture the full branching structure of merger trees.
 
 ## Citation
 
