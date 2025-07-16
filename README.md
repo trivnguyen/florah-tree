@@ -1,22 +1,25 @@
 # FLORAH: A Generative Model for Dark Matter Halo Merger Trees
 
-**FLORAH** is a generative model for creating realistic dark matter halo merger trees. It utilizes recurrent neural networks and normalizing flows to learn from N-body simulations and generate complete merger tree graph structures. This approach surpasses traditional analytical methods by accurately reproducing key merger tree statistics and enabling more precise semi-analytic modeling of galaxy formation.
+**FLORAH** is a generative model for creating realistic dark matter halo merger trees. It utilizes recurrent neural networks and normalizing flows to learn from N-body simulations and generate complete merger tree graph structures. FLORAH can accurately reproduces key merger rate statistics across a wide range of mass and redshift, outperforming conventional approaches based on the Extended Press-Schechter formalism.
 
 This repository contains the code for FLORAH, as presented in Nguyen et al. (in prep).
 
-## 🌌 Overview
+## Overview
 
-Merger trees are fundamental for understanding the hierarchical assembly of dark matter halos and are crucial inputs for semi-analytic models (SAMs) of galaxy formation. FLORAH addresses the limitations of traditional merger tree construction methods by:
-
+Merger trees are fundamental for understanding the hierarchical assembly of dark matter halos and are crucial inputs for semi-analytic models (SAMs) of galaxy formation.
+FLORAH addresses the limitations of traditional merger tree construction methods by:
 - Learning directly from cosmological N-body simulation data (e.g., Very Small MultiDark Planck).
-- Representing merger trees as complete graph structures.
-- Generating trees that accurately reproduce a wide range of statistical properties (mass functions, progenitor mass functions, etc.) across different redshifts.
-- Demonstrating compatibility with SAMs, producing galaxy-halo scaling relations consistent with simulation-based SAM outputs.
+- Representing merger trees as direct acyclic graph structures.
 
-## 🚀 Quick Start
+We show that FLORAH can generate merger trees that:
+- Generate trees that accurately reproduce a wide range of statistical properties (mass functions, progenitor mass functions, etc.) across different redshifts.
+- Demonstrate compatibility with SAMs, producing galaxy-halo scaling relations consistent with simulation-based SAM outputs.
+
+
+## Quick Start
 
 ### Public Data and Pre-trained Models
-Pre-trained models and example datasets are available on the Flatiron Institute's HPC Rusty at `/mnt/ceph/users/tnguyen/public/florah-trees`. If you don't have access to this directory, you can download both the pre-trained model and example datasets from Dropbox:
+Pre-trained models and example datasets are available on the Flatiron Institute's Rusty at `/mnt/ceph/users/tnguyen/public/florah-trees`. If you don't have access to this directory, you can download both the pre-trained model and example datasets from Dropbox:
 - https://www.dropbox.com/scl/fo/mecsi8cfhgcp1bvdk36b5/ANJ6p6ZLqastyT9D8IzKGpY?rlkey=9wmvxppce86sm1hc3cfd5a3do&st=ecju2ah7&dl=0
 
 ### Prerequisites
@@ -28,7 +31,7 @@ Pre-trained models and example datasets are available on the Flatiron Institute'
 - ML Collections
 - NumPy
 
-A GPU with CUDA support is highly recommended for training.
+If you're planning to train FLORAH on your simulation, I recommend using a GPU with CUDA support for training.
 
 ### Installation
 
@@ -46,17 +49,16 @@ A GPU with CUDA support is highly recommended for training.
 
 3.  **Install dependencies:**
     ```bash
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 # Adjust CUDA version if needed
-    pip install pytorch-lightning torch-geometric ml-collections absl-py pyyaml numpy tqdm
+    pip install torch pytorch-lightning torch-geometric ml-collections absl-py numpy tqdm
     ```
-    *Note: Ensure your PyTorch installation matches your CUDA version. PyTorch Geometric might require specific PyTorch versions; consult its documentation if you encounter issues.*
+    *Note: Ensure your PyTorch installation matches your CUDA version. PyTorch Geometric is a bit finicky and might require specific PyTorch versions; consult its documentation if you encounter issues.*
 
 4.  **Verify installation:**
     ```bash
     python -c "import florah_tree; print('FLORAH installed successfully!')"
     ```
 
-## 📚 Usage
+## Usage
 
 The primary scripts for interacting with FLORAH are `train_atg.py` for training new models and `infer_atg.py` for generating merger trees using pre-trained models.
 
@@ -68,7 +70,7 @@ FLORAH uses configuration files written with `ml_collections`. Examples can be f
 -   **Training parameters:** Learning rate, batch size, number of epochs, etc.
 -   **Inference parameters:** Number of trees to generate, output directory, etc.
 
-An example configuration file is `configs/final-models/vsmdpl-nprog3-zmax10.py`.
+An example configuration file is `configs/final-models/vsmdpl-nprog3-zmax10.py`. The config file can be a bit complex, so please feel free to reach out if you have questions about specific parameters.
 
 ### Training a New Model
 
@@ -94,7 +96,7 @@ To train FLORAH on your own merger tree dataset:
 To generate merger trees using a pre-trained FLORAH model:
 
 1.  **Ensure you have a trained model checkpoint (`.ckpt` file).**
-    Pre-trained models can be found at `/mnt/ceph/users/tnguyen/florah-tree-models` (as mentioned in the original README).
+    Pre-trained models can be found at `/mnt/ceph/users/tnguyen/florah-tree-models` on Rusty or downloaded from Dropbox (see above).
 
 2.  **Create or modify an inference configuration file:**
     This file will specify the path to the model checkpoint, parameters for the initial halo seeds (e.g., mass and redshift ranges), the number of trees to generate, and the output directory.
@@ -105,11 +107,11 @@ To generate merger trees using a pre-trained FLORAH model:
     ```
     Generated merger trees will be saved in the output directory specified in the configuration, typically as pickled lists of tree data structures.
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 florah-tree/
-├── florah_tree/           # Core FLORAH package
+├── florah_tree/          # Core FLORAH package
 │   ├── __init__.py
 │   ├── atg.py            # Main AutoregressiveTreeGen model class
 │   ├── models.py         # Neural network components (MLP, GRU, etc.)
@@ -120,15 +122,15 @@ florah-tree/
 │   ├── analysis_utils.py # Utility functions for analyzing trees
 │   └── utils.py          # General utility functions
 ├── configs/              # Configuration files for training and inference
-├── datasets.py          # Script for reading and preparing datasets
-├── train_atg.py         # Main script for training FLORAH models
-├── infer_atg.py         # Main script for generating trees with FLORAH
+├── datasets.py           # Script for reading and preparing datasets
+├── train_atg.py          # Main script for training FLORAH models
+├── infer_atg.py          # Main script for generating trees with FLORAH
 ├── tutorials/            # Jupyter notebooks for tutorials (if available)
 ├── README.md             # This file
 └── LICENSE               # Project license
 ```
 
-## 🔬 Key Scripts and Their Roles
+## Key Scripts and Their Roles
 
 -   **`train_atg.py`**:
     -   Handles the entire training pipeline.
@@ -170,18 +172,18 @@ FLORAH generates merger trees autoregressively:
 
 This graph-based generation allows FLORAH to capture the full branching structure of merger trees.
 
-## 📝 Citation
+## Citation
 
-Further publication details to be added here once available
+Further publication details to be added here once available.
 
 <!-- If you use FLORAH in your research, please cite the following paper: -->
 <!-- Nguyen et al. (in prep). -->
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 📧 Contact
+## Contact
 
 For questions or support, please open an issue on the GitHub repository or contact the corresponding author:
 - Tri Nguyen (trivtnguyen@northwestern.edu)
