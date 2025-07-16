@@ -156,8 +156,11 @@ florah-tree/
     -   Integrates the encoder (RNN/GRU), decoder, classifier (for number of progenitors), and normalizing flows (for continuous parameter generation).
     -   Implements the training, validation, and prediction steps.
 
-
-
+## Tutorials
+The `tutorials/` directory contains Jupyter notebooks that provide step-by-step guides on how to use FLORAH for training and inference.
+Currently, it includes:
+-   **`01_training.ipynb`**: A tutorial on how to train a FLORAH model on a dataset of merger trees. The notebook only guides you through setting up the configuration, loading the dataset, and running the training process. You need to provide your own dataset that is compatible with the `datasets.py` script. In the future, we will provide example datasets for training.
+-   **`02_inference.ipynb`**: A tutorial on how to use a pre-trained FLORAH model to generate new merger trees. Work in progress.
 
 
 ## Citation
