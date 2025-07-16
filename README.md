@@ -156,11 +156,8 @@ florah-tree/
     -   Integrates the encoder (RNN/GRU), decoder, classifier (for number of progenitors), and normalizing flows (for continuous parameter generation).
     -   Implements the training, validation, and prediction steps.
 
--   **`florah_tree/models.py`**:
-    -   Contains definitions for various neural network building blocks, such as Multi-Layer Perceptrons (MLPs) and Gated Recurrent Units (GRUs).
 
--   **`florah_tree/flows.py`**:
-    -   Implements the normalizing flow models used for sampling progenitor properties.
+
 
 
 ## Citation
