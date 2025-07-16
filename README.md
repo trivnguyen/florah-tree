@@ -30,8 +30,9 @@ Pre-trained models and example datasets are available on the Flatiron Institute'
 - PyTorch Geometric
 - ML Collections
 - NumPy
+- zuko (https://github.com/probabilists/zuko)
 
-If you're planning to train FLORAH on your simulation, I recommend using a GPU with CUDA support for training.
+This list is likely to miss some dependencies. Please install any additional packages as needed and reach out if you encounter issues. If you're planning to train FLORAH on your simulation, I recommend using a GPU with CUDA support for training.
 
 ### Installation
 
@@ -49,7 +50,7 @@ If you're planning to train FLORAH on your simulation, I recommend using a GPU w
 
 3.  **Install dependencies:**
     ```bash
-    pip install torch pytorch-lightning torch-geometric ml-collections absl-py numpy tqdm
+    pip install torch pytorch-lightning torch-geometric ml-collections absl-py numpy tqdm zuko pyyaml
     ```
     *Note: Ensure your PyTorch installation matches your CUDA version. PyTorch Geometric is a bit finicky and might require specific PyTorch versions; consult its documentation if you encounter issues.*
 
